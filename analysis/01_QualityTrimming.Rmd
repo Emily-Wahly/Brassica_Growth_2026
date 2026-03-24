@@ -212,6 +212,9 @@ Rprimer_complement_vmatch <-
 paste("The complement of reverse primer is found in", round(sum(Rprimer_complement_vmatch)/length(all_seqs) * 100, digits = 2),
       "% of sequences") 
 ```
+My forward and reverse sequences have less than 3% primer matches when I tested about 40 bp from the primers. I do not have to trim primers in the next step, but I do have to trim for quality. The quality step informs where to trim in both forward and reverse and what reads to filter. Since I do not have primers, I do not need to use TrimLeft.
+
+
 #Prepare a placeholder for filtered reads
 ```{r prep-filtered-sequences}
 # Create vector of sample names from the filenames 
@@ -248,25 +251,25 @@ head(filtered_forward_reads)
 ```
 
 #3. Filter and Trim Reads
-I will be using truncLen to trim the ends of the sequences to where the reads dip to 20 Phred score. It looks to be around 290 in forward and 250 in reverse. I think I will use maxEE = c(2,2). The final parameter I will include is maxN =0.
+
+I will be using truncLen to trim the ends of the sequences to where the reads dip to 20 Phred score. It looks to be around 290 in forward and 250 in reverse. I think I will use maxEE = c(2,1) since Reverse is worse quality. The final parameter I will include is maxN =0.
 
 ```{r filter-and-trim}
 # Assign and write out filtered fastq files 
 nreadF <- countFastq(forward_reads) # Forward file
 nreadR <- countFastq(reverse_reads) # Reverse file
-print(nreadF == nreadR)
-width(forward_reads)
-width(reverse_reads)
+#print(nreadF == nreadR)
+#width(forward_reads)
+#width(reverse_reads)
 filtered_reads <- 
   filterAndTrim(fwd = forward_reads, filt = filtered_forward_reads,
                 rev = reverse_reads, filt.rev = filtered_reverse_reads,
                 maxN = 0, maxEE = c(2,1), 
-                # Remove the first 8 bp in forward and 3bps in reverse reads
-                # Note, this will be the place where primers will be removed! (see example below)
+             
                 #trimLeft = c(8,3),
                 # Keep more from forward & trim more in the reverse with truncLen
-                truncLen = c(290, 240), 
-                truncQ = 15, rm.phix = TRUE, compress = TRUE, 
+                truncLen = c(290, 250), 
+                truncQ = 5, rm.phix = TRUE, compress = TRUE, 
                 # Please set threads to be 8-10 (we want to respect others using the server!)
                 # Note that if TRUE, it will use ALL threads (making it hard for others to use the server)
                 multithread = 40
@@ -388,7 +391,9 @@ percSeqs_QC_histplot <-
 numSeqs_QC_dotplot + numRetained_QC_histplot + percSeqs_QC_histplot + 
   plot_annotation(tag_levels = 'A')
 ```
-
+I removed a lot of sequences. My post-QC produced a median of 269.5 reads since I trimmed the length for the reverse only. Since many samples were poor quality, it makes sense that I lost over half of the sequences. When we first checked quality in the multiqc, I thought it looked like about half the sequences were not good enough to keep, so these results are in line with what I expected. I did lose a lot of data. Nearly 150 samples were lost. I had a lot of samples to start with so I do not feel that I have too few data now.
+I played with the parameters more. I set the minimum quality to at least 5, so any read that dipped below 5 was removed. The typical minimum is 2, but I chose to increase it because I felt too many noisy samples remained after the first filterAndTrim. I added back 10 bp also such that the scores are still above 20 with more conserved reads.
+I might come back and try to save more samples.
 
 ## B. Visualize QC differences Pre- and Post-Filering & Trimming 
 ```{r pre-post-QC-plot, fig.width=6, fig.height=5.5}
