@@ -1,0 +1,392 @@
+---
+title: "02_AssignASVs.Rmd"
+author: "Emily Wahly"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document: 
+  code_folding: show
+theme: spacelab
+highlight: tango
+toc: yes
+toc_float:
+  collapsed: no
+smooth_scroll: yes
+toc_depth: 3
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center", 
+                      # Send figures generated in this file to this folder below
+                      fig.path = "/local/workdir/erw98/Brassica_Growth_2026/figures/02_AssigningASVs")
+knitr::opts_knit$set(root.dir = '/local/workdir/erw98/Brassica_Growth_2026/')
+
+```
+# Goals 
+
+1. Infer an error model for in the filtered sequences, separately on forward and reverse reads.
+2. Assign ASVs on both forward and reverse reads separately by applying the error model.
+3. Merge forward and reverse ASVs into "contiguous ASVs".
+4. Generate the first draft of ASV count table.
+5. Quality Trimming of ASV lengths.
+6. Remove chimeras. 
+7. Assign Taxonomy with Silva Database. 
+8. Write out relevant files: `asv_table`, `asvs_fasta`, `tax_table`, and `sample_data`.
+9. Create a **S4** R data object, which in this case is known as a phyloseq, object from the `asv_table`, `tax_table`, and metadata. This will give us one data object to work with moving forward. :)
+
+## Input 
+
+1. Filtered fastq files generated from `01_QualityTrimming.Rmd`.
+2. Sample Name vector.
+
+## Output 
+
+1. ASV Count Table: `asv_table` (with and without sequence names)
+2. ASV fasta file: `asvs_fasta` for building a phylogenetic tree at a later step.
+3. Taxonomy Table  `tax_table`
+4. Sample Information: `sample_data`  track the reads lots throughout DADA2 workflow. 
+
+# Set up the Environment 
+
+## Set Seed & Threads
+
+We need to be mindful of others when we are using the server. We learned in this lesson that we can use `top` and `htop` in the shell to see how many users are currently on the server. So, if you're working through something outside of class, it's ok to increase the number of threads. And, it will make everything go faster! 
+
+Then, when we have a `multithread` parameter, we can set it to be `multithread = n_threads`. If we notice more people on the server, we can modify the n_threads in this one location. 
+
+```{r set-seed}
+# Set the seed for reproducibility
+set.seed(238428)
+
+# Let's make a parameter to set the number of threads 
+n_threads = 30
+```
+
+## Timing of this script
+
+Let's record how long this file took to run on the class server, which we will record at the end of the script. 
+
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+
+## Load Packages 
+```{r load-packages}
+# Efficient package loading with pacman 
+pacman::p_load(tidyverse, devtools, dada2, phyloseq, 
+               patchwork, DT, install = FALSE)
+```
+#Load filtered fastq files
+```{r load-files}
+# Place filtered seq files into a variable 
+filtered_fastqs_path <- "data/01_Quality_Trimming/filtered_fastqs"
+# Create Forward vector 
+filtered_forward_reads <- 
+  list.files(filtered_fastqs_path, pattern = "R1_filtered.fastq.gz",
+             full.names = TRUE)
+# Reverse vector 
+filtered_reverse_reads <- 
+    list.files(filtered_fastqs_path, pattern = "R2_filtered.fastq.gz",
+             full.names = TRUE)
+
+# Check 
+filtered_forward_reads[1:5]
+filtered_reverse_reads[1:5]
+
+# Create vector of sample names from the filenames 
+sample_names <- sapply(strsplit(basename(filtered_forward_reads), "_"), `[`,1) 
+
+# Intuition Check 
+head(sample_names)
+```
+skipping the sample names section btw
+#Learn the Errors
+MiSeq Runs: 40 Phred Scores
+
+```{r learn-plot-errors}
+# Forward Reads 
+error_forward_reads <- 
+  learnErrors(filtered_forward_reads, multithread = n_threads)
+#81 samples
+# Forward Error Plot 
+forward_error_plot <- 
+  plotErrors(error_forward_reads, nominalQ = TRUE) + 
+  labs(title = "Forward Reads: Error Model")
+
+# Reverse Reads 
+error_reverse_reads <- 
+  learnErrors(filtered_reverse_reads, multithread = n_threads)
+
+# Reverse Error Plot 
+reverse_error_plot <- 
+  plotErrors(error_reverse_reads, nominalQ = TRUE) + 
+  labs(title = "Reverse Reads: Error Model")
+
+# Look at the plots together 
+forward_error_plot + reverse_error_plot
+```
+#Infer ASVs
+```{r infer-asvs}
+# Infer ASVs on the forward sequences
+dada_forward <- 
+  dada(filtered_forward_reads, 
+       err = error_forward_reads,
+       multithread = n_threads) 
+# Take a look at the data
+# What type of data structure is it? 
+typeof(dada_forward) # It's a list 
+length(dada_forward) # How big is it? One per sample!
+#250 samples (500/2)...but I thought I had 81?
+dada_forward$'SRR11917050_R1_filtered.fastq.gz'
+# Reverse ASVs
+dada_reverse <- 
+  dada(filtered_reverse_reads,
+       err = error_reverse_reads ,
+       multithread = n_threads)
+# Check data 
+dada_reverse[30]
+
+```
+#Merge Forward and Reverse ASVs
+```{r merge}
+merged_ASVs <- 
+  mergePairs(dada_forward, filtered_forward_reads,
+             dada_reverse, filtered_reverse_reads,
+             verbose = TRUE)
+# Evaluate the data output 
+typeof(merged_ASVs) # A list
+length(merged_ASVs) # Length of the number of samples!
+head(names(merged_ASVs)) # Here, we can access our current sample names
+# Inspect further for each sample
+#head(merged_ASVs, n = 2) # A dataframe for each sample
+# We have a dataframe in each part of our list! What are in the columns? 
+glimpse(merged_ASVs$`SRR11917050_R1_filtered.fastq.gz`)
+```
+#Create Raw ASV Count Table
+
+```{r asv-table}
+# Raw ASV
+raw_ASV_table <- makeSequenceTable(merged_ASVs)
+
+# Intuition Check: Type and dimensions of the data
+dim(raw_ASV_table)   #250 2946
+typeof(raw_ASV_table) #integer
+class(raw_ASV_table) #matrix/array
+```
+#Assess ASV Quality
+INTERPRETATION #1: What is the hypothesized ASV length for your project data set? Please insert a description here, similar to the statements above, of the expected ASV length. Please provide a clear explanation using the following, which an example is provided above: (1) sequencing strategy, (2) total length of starting amplicons, (3) the expected ASV length without the primers, (4) length expected after the filterAndTrim() step, and (5) the expected percent overlap.
+
+/They sequenced 300bp despite only using the 515F/806R region. ???
+
+#ASV Length Stats
+```{r stats}
+# Calculate summary stats
+# Longest ASV?
+maxLength_ASV <- max(nchar(getSequences(raw_ASV_table))) #recall number characters nchar command
+maxLength_ASV #510
+# Shortest ASV?
+minLength_ASV <- min(nchar(getSequences(raw_ASV_table)))
+minLength_ASV #290
+# Mean ASV length?
+meanLength_ASV <- mean(nchar(getSequences(raw_ASV_table))) 
+meanLength_ASV #307
+# Median ASV length?
+medianLength_ASV <- median(nchar(getSequences(raw_ASV_table))) 
+medianLength_ASV #292
+# Create a table to Inspect the distribution of sequence lengths of all ASVs in dataset 
+table(nchar(getSequences(raw_ASV_table)))
+```
+#ASV Length Plot
+```{r length plot}
+# Inspect the distribution of sequence lengths of all ASVs in data set 
+# AFTER TRIM
+plot_ASVLength_raw <- 
+  data.frame(Seq_Length = nchar(getSequences(raw_ASV_table))) %>%
+  ggplot(aes(x = Seq_Length )) + 
+  geom_histogram() + 
+  # include the x-axis scales
+  scale_x_continuous(limits = c(0, maxLength_ASV + 5)) + 
+  labs(y = "Number of ASVs", x = "Raw ASV Length (bps)")
+
+# Show the plot
+plot_ASVLength_raw
+```
+#Trim ASV Lengths
+```{r trimming}
+# Subset only ASVs that are 292 bps long 
+raw_ASV_table_trimmed <- 
+  raw_ASV_table[,nchar(colnames(raw_ASV_table)) == 292]
+
+# Inspect the distribution of sequence lengths of all ASVs in dataset 
+table(nchar(getSequences(raw_ASV_table_trimmed)))
+# What proportion of total ASV sequences are left in the data? 
+percRetained_Trimmed <- sum((raw_ASV_table_trimmed)/sum(raw_ASV_table)*100)
+percRetained_Trimmed # 79.859% are retained... not as good as the 99% in the example
+# Inspect the distribution of sequence lengths of all ASVs in dataset 
+# AFTER TRIM
+plot_ASVLength_trimmed <- 
+  data.frame(Seq_Length = nchar(getSequences(raw_ASV_table_trimmed))) %>%
+  ggplot(aes(x = Seq_Length )) + 
+  geom_histogram() + 
+  # include the x-axis scales
+  scale_x_continuous(limits = c(0, maxLength_ASV + 5)) + 
+  labs(y = "Number of ASVs", x = "Trimmed ASV Length (bps)")
+
+# Show the plot 
+plot_ASVLength_trimmed
+#uhhh my peak is not at 3000 ASVs... visible in dim earlier... uhhh ok?
+```
+#Remove Chimeras
+```{r chimeras}
+# Remove the chimeras in the raw ASV table
+noChimeras_ASV_table <- 
+  removeBimeraDenovo(raw_ASV_table_trimmed, 
+                     method="consensus", 
+                     multithread = n_threads, 
+                     verbose=TRUE)
+#Identified 590 bimeras out of 1984 input sequences.
+#this seems high??
+dim(noChimeras_ASV_table) # 250 1394
+
+# What proportion is left of the sequences? 
+# Chimera removal compared to trimming 
+percRetained_chimerasTrimmed <- sum(noChimeras_ASV_table)/sum(raw_ASV_table_trimmed)
+# Chimera removal compared to raw  
+percRetained_chimerasRaw <-sum(noChimeras_ASV_table)/sum(raw_ASV_table)
+
+# Plot it 
+plot_ASVLength_NoChimeras <- 
+  data.frame(Seq_Length_NoChim = nchar(getSequences(noChimeras_ASV_table))) %>%
+  ggplot(aes(x = Seq_Length_NoChim )) + 
+  geom_histogram()+ 
+  # include the x-axis scales
+  scale_x_continuous(limits = c(0, maxLength_ASV + 5)) + 
+  labs(y = "Number of ASVs \n (Post-Chimera Removal)", 
+       x = "ASV Length (bps)")
+
+# Show the plot
+plot_ASVLength_NoChimeras #ouch
+```
+
+#Plot ASV Lengths after Chimera Removal
+```{r plot-lengths}
+plot_ASVLength_raw + plot_ASVLength_trimmed + plot_ASVLength_NoChimeras + 
+    plot_annotation(tag_levels = 'A')
+#so fun! fave plot
+```
+
+#Track Read Counts
+```{r}
+# A little function to identify number seqs 
+getN <- function(x) sum(getUniques(x))
+
+# Make the table to track the seqs 
+track <- cbind(sapply(dada_forward, getN),
+               sapply(dada_reverse, getN),
+               sapply(merged_ASVs, getN),
+               rowSums(noChimeras_ASV_table))
+
+head(track)
+#ok
+# Update column names to be more informative (most are missing at the moment!)
+colnames(track) <- c("denoisedF", "denoisedR", "merged", "nochim")
+rownames(track) <- row.names(noChimeras_ASV_table)
+
+# Generate a dataframe to track the reads through our DADA2 pipeline
+track_counts_df <- 
+  track %>%
+  # make it a dataframe
+  as.data.frame() %>%
+  rownames_to_column(var = "sample_names")
+
+# Now let's add a column for the number of ASVs
+# First, intuition check that the samples match 
+stopifnot(track_counts_df$sample_names == row.names(noChimeras_ASV_table))
+
+# Now, let's add a new column with the number of ASVs
+track_counts_df <- 
+  track_counts_df %>%
+  mutate(num_ASVs = rowSums(noChimeras_ASV_table > 1))
+
+# Visualize it in table format 
+DT::datatable(track_counts_df)
+
+#cool... plot it?
+track_counts_df %>%
+  pivot_longer(denoisedF:nochim, names_to = "read_type", values_to = "num_reads") %>%
+  mutate(read_type = fct_relevel(read_type, "denoisedF", "denoisedR", "merged", "nochim")) %>%
+  ggplot(aes(x = read_type, y = num_reads, fill = read_type)) + 
+  geom_line(aes(group = sample_names), color = "grey") + 
+  geom_point(shape = 21, size = 3, alpha = 0.8) + 
+  scale_fill_brewer(palette = "Spectral") + 
+  labs(x = "Filtering Step", y = "Number of Sequences") + 
+  theme_bw()
+#well... uhh
+
+#plot it
+plot_ReadDepth <- 
+  track_counts_df %>%
+  ggplot(aes(x = nochim)) + 
+  geom_histogram() + 
+  labs(x = "Total # of Sequences", y = "# of Samples") + 
+  theme_bw()
+
+# What is the ASV richness per sample? 
+plot_ASVRichness <- 
+  track_counts_df %>%
+  ggplot(aes(x = num_ASVs)) + 
+  geom_histogram() + 
+  labs(x = "Total # of ASVs", y = "# of Samples") + 
+  theme_bw()
+
+# Now, let's look at the relationship of ASVs and Sequencing depth 
+plot_ReadDepth_ASVRichness <- 
+  track_counts_df %>%
+  ggplot(aes(x = nochim, y = num_ASVs)) + 
+  geom_point() + 
+  labs(x = "Total # of Sequences", y = "# of ASVs") + 
+  theme_bw()
+
+# Show the plots together 
+plot_ReadDepth + plot_ASVRichness + plot_ReadDepth_ASVRichness + 
+    plot_annotation(tag_levels = 'A')
+#well that just doesn't look good.
+```
+#Assign Taxonomy
+Here, we will use the silva database version 138.2, which has been properly formatted for DADA2. The files came from this DADA2-formatted reference databases website, which hosts several other reference taxomoy files for several popular taxonomic databases.
+```{r taxonomy}
+# Assign up to genus level 
+taxa_train <- 
+  assignTaxonomy(noChimeras_ASV_table, 
+                 refFasta = "/workdir/in_class_data/taxonomy/silva_nr99_v138.2_toGenus_trainset.fa.gz", 
+                 multithread = n_threads)
+
+# Add the genus/species information 
+taxa_addSpecies <- 
+  addSpecies(taxa_train, 
+              refFasta = "/workdir/in_class_data/taxonomy/silva_v138.2_assignSpecies.fa.gz")
+
+# Inspect the taxonomy 
+glimpse(taxa_addSpecies) # Note that the rownames are the ASV sequences!\# Let's removing the ASV sequence rownames for display only
+taxa_print <- taxa_addSpecies 
+rownames(taxa_print) <- NULL
+head(taxa_print)
+```
+#EXPORTING
+##1. ASV Tables
+Let’s check that the ASVs are in the rows and the sample names are in the columns. If not, we can use the transpose function t() in R.
+```{r}
+# What's the current format of the ASV table?
+head(rownames(noChimeras_ASV_table)) # Samples!
+head(colnames(noChimeras_ASV_table)) # ASV Sequences
+# Therefore, we need to transpose the matrix 
+final_ASV_table_withSeqs <- t(noChimeras_ASV_table)
+
+# Intuition check
+head(rownames(final_ASV_table_withSeqs)) # ASV Sequences
+head(colnames(final_ASV_table_withSeqs)) # Sample names
+```
+restarting here... next step needs to be more careful to not mess up sample names
