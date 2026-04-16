@@ -4,14 +4,16 @@ author: "Emily Wahly"
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 output:
   html_document: 
-  code_folding: show
-theme: spacelab
-highlight: tango
-toc: yes
-toc_float:
-  collapsed: no
-smooth_scroll: yes
-toc_depth: 3
+    code_folding: show
+    theme: spacelab
+    highlight: pygments
+    keep_md: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+      toc_depth: 3
+  keep_md: true  
 editor_options: 
   chunk_output_type: console
 ---
@@ -138,7 +140,7 @@ preQC_aggregate_plot
 
 #2. Check for Primers
 
-```{r search-primers-test}
+```{r search-primers-test, eval=FALSE, include=FALSE}
 # Search the sequences for primers to check if they are present
 # Pull out the raw_fastq sequences from all of the raw sequencing files 
 raw_fastqs <- readFastq(dirPath = raw_fastqs_path)
@@ -170,7 +172,7 @@ matchPattern(pattern = "ANAGA", # Part of the test seq with degeneracy
 
 Specifically test for the **forward** primers: 
   
-```{r forward-primers}
+```{r forward-primers, eval=FALSE, include=FALSE}
 ############ FORWARD PRIMERS ############ 
 # Now, let's search the sequences for the primers
 # Search first for forward primer 
@@ -195,7 +197,7 @@ paste("The complement of the forward primer is found in", round(sum(Fprimer_comp
 
 Specifically test for the **reverse** primers: 
   
-```{r reverse-primers}
+```{r reverse-primers, eval=FALSE, include=FALSE}
 ############ REVERSE PRIMERS ############ 
 Rprimer_vmatch <- 
   vcountPattern(pattern = r_primer, 
@@ -264,11 +266,11 @@ nreadR <- countFastq(reverse_reads) # Reverse file
 filtered_reads <- 
   filterAndTrim(fwd = forward_reads, filt = filtered_forward_reads,
                 rev = reverse_reads, filt.rev = filtered_reverse_reads,
-                maxN = 0, maxEE = c(2,1), 
+                maxN = 0, maxEE = c(2,2), 
              
                 #trimLeft = c(8,3),
                 # Keep more from forward & trim more in the reverse with truncLen
-                truncLen = c(290, 250), 
+                truncLen = c(250, 175), 
                 truncQ = 5, rm.phix = TRUE, compress = TRUE, 
                 # Please set threads to be 8-10 (we want to respect others using the server!)
                 # Note that if TRUE, it will use ALL threads (making it hard for others to use the server)

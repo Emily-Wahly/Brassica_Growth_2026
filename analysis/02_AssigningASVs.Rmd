@@ -256,7 +256,8 @@ dim(noChimeras_ASV_table) # 250 1394
 percRetained_chimerasTrimmed <- sum(noChimeras_ASV_table)/sum(raw_ASV_table_trimmed)
 # Chimera removal compared to raw  
 percRetained_chimerasRaw <-sum(noChimeras_ASV_table)/sum(raw_ASV_table)
-
+percRetained_chimerasRaw
+percRetained_chimerasTrimmed
 # Plot it 
 plot_ASVLength_NoChimeras <- 
   data.frame(Seq_Length_NoChim = nchar(getSequences(noChimeras_ASV_table))) %>%
