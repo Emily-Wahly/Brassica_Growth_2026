@@ -1,0 +1,127 @@
+---
+title: "Preprocessing"
+author: "Emily Wahlenmayer"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document: 
+    code_folding: show
+    theme: spacelab
+    highlight: pygments
+    keep_md: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+      toc_depth: 3
+  keep_md: true  
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center",
+                      # send any figure output to this folder 
+                      fig.path = "../../figures/03_Preprocessing/")
+```
+
+
+# Goals
+
+The goal with this file is to pre-process any other contaminants and unexpected ASVs from our sample. We will need to: 
+
+1. Remove any contaminating ASVs that are **chloroplasts**. 
+2. Remove ASVs that are **mitochondria**. 
+3. Evaluate any ASVs from the **negative controls**. Then, remove negative controls. 
+4. Evaluate the mock community or **positive control** to learn the accuracy of sequencing. 
+5. Check for **reverse complements**. 
+6. Check the **sequencing depth** of samples. Remove samples that obviously have too few reads. 
+7. Add the metadata for class dataset (Note: Your data may already be in your `sample_data()`). 
+8. Write a `preprocessed_physeq` to be used in the next step of our workflow. 
+
+## Input 
+
+Here, we will start with the phyloseq object that we created in 02_AssignASVs.Rmd
+
+1. **Raw phyloseq object**: We will need `data/02_AssignASVs/raw_phyloseq.RData`. 
+2. **Mock Amplicon Fasta**: Please copy over the `mock_amplicons.fasta` from `/workdir/in_class_data/` to your `data/03_PreProcessing` folder.
+
+
+## Output
+
+1. We will write out a complex R data object known as an **S4** object, which in this case is known as a phyloseq output. We will store this in  `data/03_PreProcessing/preprocessed_phyloseq.RData`.  
+
+
+# Set up the Environment 
+
+## Set the seeds and threads 
+
+```{r seed-threads}
+# Set the seed for reproducibility
+set.seed(238428)
+```
+
+## Timing of this script
+
+Let's record how long this file took to run on the class server, which we will record at the end of the script. 
+
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+## Load packages  
+```{r load-libraries}
+# Load packages 
+pacman::p_load(devtools, phyloseq, Biostrings, tidyverse, dada2, patchwork,
+               # Note to add ggpubr & rstatix!!
+               ggpubr, rstatix, install = FALSE)
+```
+
+
+# Load Phyloseq Data
+
+```{r phyloseq-handoff}
+# Load the data 
+load("/local/workdir/erw98/Brassica_Growth_2026/data/raw_physeq.RData")
+
+# Look at the data 
+View(raw_physeq)
+
+load("/local/workdir/erw98/Brassica_Growth_2026/data/02_AssigningASVs/ASV_taxonomy.tsv")
+```
+
+# Clean up the data
+
+**Chloroplasts** and **mitochondria** need to be removed from 16S datasets because they contain their own 16S rRNA genes, which are evolutionarily derived from bacteria. These organelles can be unintentionally amplified during PCR, especially in samples from plants (chloroplasts) or animals (mitochondria), leading to misleading results by inflating microbial diversity.
+
+This is explained by the [endosymbiotic theory](https://bio.libretexts.org/Bookshelves/Microbiology/Microbiology_(Kaiser)/Unit_4%3A_Eukaryotic_Microorganisms_and_Viruses/07%3A_The_Eukaryotic_Cell/7.8%3A_The_Endosymbiotic_Theory), which proposes that mitochondria and chloroplasts originated from free-living bacteria that were engulfed by ancestral eukaryotic cells. Over time, they became permanent, symbiotic organelles with their own genomes. Because of this bacterial ancestry, their 16S rRNA genes are similar to those targeted in bacterial 16S profiling, even though they are part of the host organism and not part of the microbial community being studied.
+
+Removing these sequences ensures the analysis reflects true bacterial and archaeal diversity in the environment or host.
+
+## 1. Remove Chloroplasts
+
+
+```{r rm-chloros}
+# Let's take a quick look at the taxa table 
+# View(tax_df) # Let's see where chloroplasts are and also mitochondria
+
+# Make new physeq without chloroplasts
+noChloros_physeq <- 
+  raw_physeq %>% 
+  # rm chloroplasts, which are Order
+  subset_taxa(Order != "Chloroplast" | is.na(Order))
+  
+# How many taxa were chloroplasts? 
+num_chloro_ASVs <- ntaxa(raw_physeq) - ntaxa(noChloros_physeq)
+num_chloro_ASVs
+
+# Intuition chek 
+#noChloros_physeq %>%
+#  tax_table() %>%
+#  data.frame() %>%
+#  View()
+```
+
+There were `r num_chloro_ASVs` ASVs that were chloroplasts.
+
+
