@@ -1,0 +1,684 @@
+---
+title: "Preprocessing"
+author: "Emily Wahlenmayer"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    code_folding: show
+    theme: spacelab
+    highlight: pygments
+    keep_md: false
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+      toc_depth: 3
+  keep_md: true
+  pdf_document:
+    toc: true
+editor_options:
+  chunk_output_type: console
+---
+```{r}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center",
+                      # send any figure output to this folder 
+                      fig.path = "/local/workdir/erw98/Brassica_Growth_2026/figures/03_Preprocessing")
+```
+
+
+# Goals
+
+The goal with this file is to pre-process any other contaminants and unexpected ASVs from our sample. We will need to: 
+
+1. Remove any contaminating ASVs that are **chloroplasts**. 
+2. Remove ASVs that are **mitochondria**. 
+3. Evaluate any ASVs from the **negative controls**. Then, remove negative controls. 
+4. Evaluate the mock community or **positive control** to learn the accuracy of sequencing. 
+5. Check for **reverse complements**. 
+6. Check the **sequencing depth** of samples. Remove samples that obviously have too few reads. 
+7. Add the metadata for class dataset (Note: Your data may already be in your `sample_data()`). 
+8. Write a `preprocessed_physeq` to be used in the next step of our workflow. 
+
+## Input 
+
+Here, we will start with the phyloseq object that we created in 02_AssignASVs.Rmd
+
+1. **Raw phyloseq object**: We will need `data/02_AssignASVs/raw_phyloseq.RData`. 
+2. **Mock Amplicon Fasta**: Please copy over the `mock_amplicons.fasta` from `/workdir/in_class_data/` to your `data/03_PreProcessing` folder.
+
+
+## Output
+
+1. We will write out a complex R data object known as an **S4** object, which in this case is known as a phyloseq output. We will store this in  `data/03_PreProcessing/preprocessed_phyloseq.RData`.  
+
+
+# Set up the Environment 
+
+## Set the seeds and threads 
+
+```{r seed-threads}
+# Set the seed for reproducibility
+set.seed(238428)
+```
+
+## Timing of this script
+
+Let's record how long this file took to run on the class server, which we will record at the end of the script. 
+
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+## Load packages  
+```{r load-libraries}
+# Load packages 
+pacman::p_load(devtools, phyloseq, Biostrings, tidyverse, dada2, patchwork,
+               # Note to add ggpubr & rstatix!!
+               ggpubr, rstatix, install = FALSE)
+```
+
+
+# Load Phyloseq Data
+
+```{r phyloseq-handoff}
+# Load the data
+load("/local/workdir/erw98/Brassica_Growth_2026/data/raw_physeq.RData")
+
+# Look at the data
+raw_physeq
+
+#load("/local/workdir/erw98/Brassica_Growth_2026/data/02_AssigningASVs/ASV_taxonomy.tsv")
+```
+
+# Clean up the data
+
+**Chloroplasts** and **mitochondria** need to be removed from 16S datasets because they contain their own 16S rRNA genes, which are evolutionarily derived from bacteria. These organelles can be unintentionally amplified during PCR, especially in samples from plants (chloroplasts) or animals (mitochondria), leading to misleading results by inflating microbial diversity.
+
+This is explained by the [endosymbiotic theory](https://bio.libretexts.org/Bookshelves/Microbiology/Microbiology_(Kaiser)/Unit_4%3A_Eukaryotic_Microorganisms_and_Viruses/07%3A_The_Eukaryotic_Cell/7.8%3A_The_Endosymbiotic_Theory), which proposes that mitochondria and chloroplasts originated from free-living bacteria that were engulfed by ancestral eukaryotic cells. Over time, they became permanent, symbiotic organelles with their own genomes. Because of this bacterial ancestry, their 16S rRNA genes are similar to those targeted in bacterial 16S profiling, even though they are part of the host organism and not part of the microbial community being studied.
+
+Removing these sequences ensures the analysis reflects true bacterial and archaeal diversity in the environment or host.
+
+## 1. Remove Chloroplasts
+
+```{r rm-chloros}
+# Let's take a quick look at the taxa table 
+# View(tax_df) # Let's see where chloroplasts are and also mitochondria
+
+# Make new physeq without chloroplasts
+noChloros_physeq <- 
+  raw_physeq %>% 
+  # rm chloroplasts, which are Order
+  subset_taxa(Order != "Chloroplast" | is.na(Order))
+  
+# How many taxa were chloroplasts? 
+num_chloro_ASVs <- ntaxa(raw_physeq) - ntaxa(noChloros_physeq)
+num_chloro_ASVs #694
+
+# Intuition check 
+#noChloros_physeq %>%
+#  tax_table() %>%
+#  data.frame() %>%
+#  View()
+```
+
+There were `r num_chloro_ASVs` ASVs that were chloroplasts.
+
+
+## 2. Remove Mitochondria  
+
+```{r rm-mitos}
+# remove mitochondria 
+noChlorosMitos_physeq <- 
+  noChloros_physeq %>%
+  subset_taxa(Family != "Mitochondria" | is.na(Family)) %>%
+  prune_samples(!grepl("Dup", sample_names(.)), .)
+
+
+# How many mitochondrial ASVs? 
+num_mito_ASVs <- ntaxa(noChloros_physeq) - ntaxa(noChlorosMitos_physeq)
+num_mito_ASVs #27
+
+# Let's take a quick look 
+noChlorosMitos_physeq
+```
+
+There were `r num_mito_ASVs` ASVs that were mitochondria in the data set.
+
+<span style="color: red;">INTERPRETATION #1: How many chloroplast and/or mitochondrial ASVs in your dataset? Does this seem reasonable?</span> 
+
+
+```{r rm-mitos-chloros}
+# How many total asvs were removed from chloros and mitos? 
+ntaxa(raw_physeq) - ntaxa(noChlorosMitos_physeq) #721
+# proportion of asvs kept? 
+ntaxa(noChlorosMitos_physeq)/ntaxa(raw_physeq) #84.54%
+```
+
+721 samples are mitochondria/chloroplasts. This is higher than the in-class example. I am curious why, if it's an error or too high, and if different sampling methods tend to have different chloro/mito levels. (ie. do aquatic samples tend to have less chloro than leaf?)
+
+It seems I have no controls.
+
+### 3a. Evaluate Negative Control ASVs in Samples vs Controls
+
+```{r plot-asvs-first-try, echo=TRUE, fig.height=3, fig.width=7}
+
+
+asv_abundance_df <- 
+  noChlorosMitos_physeq %>%
+  otu_table() %>%
+  as("matrix") %>%
+  rowSums() %>%
+  data.frame(Abundance = .) %>%
+  tibble::rownames_to_column("ASV") %>%
+  arrange(desc(Abundance))
+
+asv_abundance_df <- asv_abundance_df %>%
+  dplyr::filter(Abundance > 0)
+
+top_n <- 50
+
+#Plot ASV Abundance (top_n)
+asv_abundance_df %>%
+  dplyr::slice_head(n = top_n) %>%
+  ggplot(aes(x = reorder(ASV, Abundance), 
+             y = Abundance, 
+             fill = ASV)) +
+  geom_col() +
+   scale_fill_viridis_d() +   # discrete colors (not gradient)
+  #not exactly what I wanted but ok
+  #coord_flip() + #make into horizontal bars instead
+  labs(x = "ASV", 
+       y = "Total Abundance",
+       title = paste("Top", top_n, "ASVs by Abundance")) +
+  theme(
+    legend.position = "none"
+  )
+# 
+# as.data.frame(tax_table(noChlorosMitos_physeq)) %>%
+#   dplyr::filter(ASV == "ASV_0001")
+sum(taxa_sums(noChlorosMitos_physeq) > 0) #3943
+
+#Removing any ASVs <10
+physeq_filtered <- prune_taxa(taxa_sums(noChlorosMitos_physeq) > 10, noChlorosMitos_physeq)
+sum(taxa_sums(physeq_filtered) > 0) #3299
+# #Boiling down to Genus level
+# physeq_genus <- tax_glom(physeq_filtered, taxrank = "Genus")
+# ntaxa(physeq_genus) #291
+# #This is closer to the number of ASVs in the paper
+
+#Make a real df from this and plot it again now that I've narrowed it down:
+
+# genus_abundance_df <- 
+#   physeq_genus %>%
+#   otu_table() %>%
+#   as("matrix") %>%
+#   rowSums() %>%
+#   data.frame(Abundance = .) %>%
+#   tibble::rownames_to_column("Genus")
+# genus_abundance_df$Genus[is.na(genus_abundance_df$Genus)] <- "Unassigned"
+# 
+# 
+# genus_abundance_df %>%
+#   dplyr::arrange(desc(Abundance)) %>%
+#   dplyr::slice_head(n = top_n) %>%
+#   ggplot(aes(x = reorder(Genus, -Abundance),
+#              y = Abundance,
+#              fill = Genus)) +
+#   geom_col() +
+#   scale_fill_viridis_d() +
+#   labs(x = "Genus",
+#        y = "Total Abundance",
+#        title = paste("Top", top_n, "Genera (Filtered ASVs ≥10 reads)")) +
+#   theme_bw() +
+#   theme(
+#     axis.text.x = element_text(angle = 45, hjust = 1),
+#     legend.position = "none"
+#   )
+
+ntaxa(noChlorosMitos_physeq)      # original ASVs
+ntaxa(physeq_filtered)            # after filtering
+# ntaxa(physeq_genus)               # after collapsing to Genus
+# class(physeq_genus)
+#3943, 3299, and 291
+#don't know why the most abundant is on the left now
+
+
+
+
+#####Residual from class (not running):######
+# Make a phyloseq object with only the negative controls 
+#neg_control_samples <- c("Control")
+
+# Create a phyloseq object with only negative controls 
+# neg_control_physeq <- 
+#   noChlorosMitos_physeq %>%
+# subset_samples(., names %in% neg_control_samples) %>%
+#   # force remove ASVs with 0 counts 
+#   prune_taxa(taxa_sums(.) > 0, .)
+# noChlorosMitos_physeq <- noChlorosMitos_physeq %>%
+#   { prune_taxa(taxa_sums(.) > 0, .) }
+# # Let's take a look
+# neg_control_physeq
+# class(noChlorosMitos_physeq)
+# taxa_sums(noChlorosMitos_physeq)
+# # vector of negative control asvs
+# neg_control_ASVs <- 
+#   neg_control_physeq %>%
+#   tax_table() %>%
+#   data.frame() %>%
+#   dplyr::select(ASV) %>%
+#   as.vector()
+# 
+# # Visualize raw abundance values of control ASVs
+# neg_control_physeq %>%
+#   plot_bar(., "ASV", fill = "ASV")
+#this plot doesn't work
+```
+
+
+#### Check Taxonomy
+```{r negControl-ASV-taxonomy, eval=FALSE, include=FALSE}
+# asv_negControls_df %>%
+#   dplyr::filter(OTU %in% neg_control_physeq$ASV) %>%
+#   dplyr::select(Kingdom:ASV) %>%
+#   unique() %>%
+#   arrange(ASV)
+```
+
+```{r asvs-to-keep-plot}
+# Let's zoom in only on these two that we care about! 
+# asv_negControls_df %>%
+#   dplyr::filter(OTU %in% c("ASV_2399", "ASV_2424")) %>%
+#   ggplot(aes(x = Sample_or_Control, y = Abundance, 
+#              color = Sample_or_Control, fill = Sample_or_Control)) + 
+#   geom_boxplot(alpha =0.3, outlier.shape = NA) + 
+#   geom_jitter() + 
+#   facet_wrap(.~ASV, scales = "free") + 
+#   scale_color_manual(values = c("firebrick3", "cornflowerblue")) + 
+#   scale_fill_manual(values = c("firebrick3", "cornflowerblue")) +
+#   theme_bw() + theme(legend.position = "none")
+
+```
+
+Now, let's actually remove the ASVs that are more abundant in the negative controls compared to the samples. 
+
+
+```{r rm-negControl-ASVs, eval=FALSE, include=FALSE}
+# Would only like to keep ASV_0019 and ASV_0055, everything else will be removed
+#controlASVs_toREMOVE <- dplyr::setdiff(neg_control_ASVs$ASV, c("ASV_0019", "ASV_0055"))
+# double check 
+#length(controlASVs_toREMOVE)
+# 
+# # Make new phyloseq object with negControl ASVs removed 
+# noControlsChlorosMitos_physeq <- 
+#   noChlorosMitos_physeq #%>%
+# #  # Actually remove the control ASVs 
+# #  subset_taxa(., !(ASV %in% controlASVs_toREMOVE)) %>%
+#   # Remove control samples 
+#  # subset_samples(., !(names %in% neg_control_samples))
+# 
+# # Inspect no controls object 
+# noControlsChlorosMitos_physeq
+# 
+# # After filtering, how many ASVs were removed? 
+# total_ASVs_rm <- ntaxa(raw_physeq) - ntaxa(noControlsChlorosMitos_physeq)
+# total_ASVs_rm
+```
+
+<span style="color: red;">INTERPRETATION #2: Did your dataset have any negative controls? If so, how many ASVs did you remove? Does that seem reasonable to you?</span>
+No controls
+
+# 4. Positive Controls 
+
+
+```{r eval-accuracy, eval=FALSE, include=FALSE}
+# Make mock phyloseq object 
+sample_names(noChlorosMitos_physeq)
+#I have no mock communities. Skipping this section
+# mock_physeq <- 
+#   noControlsChlorosMitos_physeq %>%
+#   subset_samples(., names == "MockZymoPos") %>%
+#   prune_taxa(taxa_sums(.) > 0, .)
+# 
+# # Inspect it 
+# mock_physeq
+# tax_table(mock_physeq)
+# 
+# # write us a messages summarizing this
+# cat("DADA2 inferred", ntaxa(mock_physeq), "ASVs present in the mock community.")
+# 
+# ####### Load in the mock reference sequence from Zymo 
+# mock_ref <- getSequences("data/Lecture/03_PreProcessing_Lecture/mock_amplicons.fasta")
+# names(mock_ref)
+# 
+# ### Pull out seqs from Sequenced Mock community
+# mock_seqs <- 
+#   mock_physeq %>%
+#   tax_table() %>%
+#   data.frame() %>%
+#   dplyr::select(ASV, ASVseqs) 
+# 
+# # Inspect
+# head(mock_seqs)
+# 
+# # Which ASVs match the reference? 
+# matched_asvs <- 
+#   mock_seqs %>%
+#   rowwise() %>%
+#   # check each ASV if they match, TRUE, if not = FALSE
+#   mutate(Match = any(grepl(ASVseqs, mock_ref))) %>%
+#   # Create a vector of names that matched 
+#   pull(ASV)
+# 
+# 
+# # Evaluate which ones do NOT match?? 
+# # What's their abundances? 
+# # This help provide error rate 
+# cat(length(matched_asvs), "ASVs were exact matches to the expected reference sequence.")
+# 
+# # How many sequences were in the mock? 
+# mock_SeqDepth <- 
+#   mock_physeq %>%
+#   otu_table() %>%
+#   data.frame() %>%
+#   colSums()
+# 
+# # Who is in the sequenced mock community? 
+# mock_physeq %>%
+#   tax_table() %>%
+#   data.frame() %>%
+#   dplyr::select(Genus, Species)
+# names(mock_ref)
+# 
+# # Curious: What are the mock counts in the actual samples 
+# noControlsChlorosMitos_physeq %>%
+#   subset_taxa(., ASV %in% matched_asvs) %>%
+#   otu_table() %>%
+#   t()
+```
+
+*What can we conclude about the mock community???*
+
+<span style="color: red;">INTERPRETATION #3: Did your dataset have a mock community? If so, what can you say about the accuracy of your sequencing run?</span>
+
+My dataset does not have a mock community.
+
+## Remove the mock community and it's ASVs
+
+```{r rm-mock-asvs, eval=FALSE, include=FALSE}
+# Make a new phyloseq object without mock and its asvs
+# noControlsMock_ChlorosMitos_physeq <- 
+#   noControlsChlorosMitos_physeq %>%
+#   # remove the mock community 
+#   subset_samples(., names != "MockZymoPos") %>%
+#   # remove the ASVs from the mock 
+#   subset_taxa(., !(ASV %in% matched_asvs))
+# 
+# # Inspect
+# noControlsMock_ChlorosMitos_physeq
+# 
+# # Intuition Check 
+# num_ASVs_mock <- ntaxa(noControlsChlorosMitos_physeq) - ntaxa(noControlsMock_ChlorosMitos_physeq)
+# 
+# # Check 
+# stopifnot(num_ASVs_mock == 8)
+```
+
+
+#Back to it:
+
+# 5. Reverse Complements 
+
+During PCR amplification, sequencing, or bioinformatics processing, it’s possible that some sequences get read in the reverse orientation, are assigned to the wrong strand, or are present as both the forward and reverse complement versions in your dataset. This is especially common when using non-strand-specific sequencing protocols, the pipeline doesn’t enforce consistent orientation, or working with merged paired-end reads and haven’t filtered by orientation yet.
+
+## How to identify reverse complements? 
+
+- You can search your ASV or OTU table for reverse complement matches.
+- If two sequences are reverse complements of each other, you can merge them and recalculate abundances.
+- Tools like VSEARCH, USEARCH, or even custom scripts in R or Python can help identify reverse complements.
+- Some pipelines (like DADA2) handle this automatically if you process all reads with the same orientation. This can be done in the `filterAndTrim()` step by using the `orient.fwd` parameter. But if you merge reads from multiple sources, it’s worth checking.
+
+Reverse complements can show up in your dataset when identical sequences are read or processed in opposite orientations. If not accounted for, they can artificially inflate diversity and confuse your analyses. By searching for and collapsing reverse complements, you ensure that your 16S data is more accurate and biologically meaningful. 
+
+```{r reverse-complements}
+# Pull out Taxa Table. Have to use noChlorosMitos because ASVs don't work on Genus
+tax_table <- 
+  noChlorosMitos_physeq %>%
+  tax_table() %>% 
+  data.frame()
+
+#noChlorosMitos_physeq
+
+#tax_table
+
+# Grab ASV Sequences and Names
+asv_names <- tax_table$ASV
+asv_seqs <- tax_table$ASVseqs
+
+# Create empty comparison matrix
+asv_rev_comp <- matrix(nrow=length(asv_seqs), ncol = length(asv_seqs)) 
+
+# Fix the names in the rows and columns 
+rownames(asv_rev_comp) <- asv_names
+colnames(asv_rev_comp) <- asv_names
+
+# Convert sequences to Biostrings
+asv_dna <- DNAStringSet(asv_seqs) 
+
+# Inspect 
+head(asv_dna)
+
+# Construct reverse complement
+asv_rev_dna <- reverseComplement(asv_dna) 
+
+# Now loop through every asv sequence to check 
+for(i in 1:length(asv_seqs)){ # For each asv sequence...
+  match_vec <- asv_dna[i] == asv_rev_dna # Compare it to the reverse complement of every other sequence...
+  asv_rev_comp[,i] <- match_vec # Write that logical vector as a new column 
+}
+
+# Find how many TRUEs (matches) we have, divide by 2 because each pair occurs twice
+cat("For", sum(asv_rev_comp) / 2,"ASVs, the reverse complement will need to be removed") 
+```
+
+# Interpretation 1
+<span style="color: red;">INTERPRETATION #4: Do you have any reverse complements in your dataset? </span> 
+
+<span style="font-weight: bold;">I have 5 reverse complements which is biologically insignificant. We do not merge them in this code.</span>
+
+# 6. Sequencing Depth 
+
+## How to deal with unequal sequencing depth? 
+
+We often normalize for sequencing depth before comparing samples using methods like:
+
+- *Rarefaction*: Subsampling many times (typically 1,000 times) to an even depth.
+- *Scaling*: Transform sample counts by multiplying by the ASV count by the minimum library size in the dataset.  
+- *Proportional normalization*: Converting to relative abundance (all ASV values within a sample add up to 1). 
+- *Statistical modeling*: DESeq2, which accounts for depth.
+
+Let's take a look! 
+
+```{r seq-depth, fig.height=3, fig.width=8}
+# The current data object
+noChlorosMitos_physeq
+summary(physeq_filtered)
+# Make a metadata_df for joining
+metadata_df <- 
+  physeq_filtered %>%
+  sample_data() %>% 
+  data.frame()
+
+# What is the library size/sequencing depth for each sample? 
+seqSums_df <- 
+  physeq_filtered %>%
+  otu_table() %>%
+  # Sum each sample column 
+  colSums() %>%
+  data.frame() %>%
+  rownames_to_column(var = "Run") %>%
+  left_join(., metadata_df, by = "Run") 
+
+#Troubleshooting that
+# otu_table(noChlorosMitos_physeq)
+# taxa_are_rows(noChlorosMitos_physeq)
+# rownames(noChlorosMitos_physeq)
+# otu_mat <- as(otu_table(noChlorosMitos_physeq), "matrix")
+# seqSums_df <- data.frame(
+#   names = colSums(otu_mat)
+# )
+# seqSums_df <- data.frame(
+#   names = names(colSums(otu_mat)),
+#   seq_depth = colSums(otu_mat)
+# )
+# colnames(metadata_df)
+# head(metadata_df)
+# ###
+# Rename second column 
+colnames(seqSums_df)[2] <- "TotalSeqs"
+
+####
+# check
+dim(seqSums_df)
+#View(seqSums_df)
+#252 35
+
+# Show the depth of samples 
+seqSums_df %>%
+  dplyr::select(Run, TotalSeqs) %>%
+  arrange(TotalSeqs) %>%
+  head()
+
+# plot it as a bar plot 
+numSeq_bar_plot <- 
+  seqSums_df %>%
+  ggplot(aes(x=reorder(Run, TotalSeqs), y = TotalSeqs,
+             fill = create_date)) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_blank()) + 
+  labs(y = "Read Depth", x = "Sample") + 
+  theme(legend.position = "none")
+
+# histogram
+numSeq_hist_plot <- 
+  seqSums_df %>%
+  ggplot(aes(x= TotalSeqs, fill = create_date)) + 
+  geom_histogram(color = "black") + 
+  labs(y = "# of Samples", x = "Read Depth") + 
+  theme(legend.position = "bottom")
+
+# Density plot 
+numSeq_density_plot <- 
+  seqSums_df %>%
+  ggplot(aes(TotalSeqs, fill = create_date)) +
+  geom_density(alpha = 0.5) + 
+  labs(x = "Read Depth") + 
+  theme(legend.position = "none")
+
+# Put it all together 
+numSeq_bar_plot + numSeq_hist_plot + numSeq_density_plot + 
+  plot_annotation(tag_levels = "A") 
+
+```
+
+<span style="color: red;">INTERPRETATION #5: What can you conclude about your sequencing depths? What are your sample distributions? Do you have "enough" reads? Are there any samples that should be removed at this step?</span>
+<span style="font-weight: bold;">I would expect to see a more normal curve in plots B and C and to remove any samples with near 0 read depth; here, most of my samples have low reads, though I've already removed anything with <10. </span>
+```{r which-to-remove, echo=FALSE}
+otu_mat <- otu_table(physeq_filtered)
+taxa_are_rows(otu_mat)
+seq_depth <- colSums(otu_mat)
+seq_depth_df <- data.frame(
+  Sample = names(seq_depth),
+  Depth = as.numeric(seq_depth)
+)
+ggplot(seq_depth_df, aes(x = Depth)) +
+  geom_histogram(bins = 30) +
+  scale_x_log10()
+
+```
+<span style="font-weight: bold;"> Here we can see the sequencing depth clearer which can inform a better cutoff. I will choose the dip at 1200 since 1000-2000 seems to be standard for phyllosphere studies. </span>
+
+```{r trim-by-depth}
+# Final check of the sequencing depth for now
+# Here, I remove the samples <1200 reads
+physeq_depth1200 <- physeq_filtered
+
+physeq_depth1200 <- prune_samples(
+  sample_sums(physeq_depth1200) > 1200,
+  physeq_depth1200
+)
+physeq_depth1200 <- prune_samples(
+  sample_sums(physeq_depth1200) > 0,
+  physeq_depth1200
+)
+sort(sample_sums(physeq_depth1200))
+
+#GAH why was that so hard!
+#plotting
+
+seq_depth_df_1200 <- data.frame(
+  Sample = names(sample_sums(physeq_depth1200)),
+  Depth = as.numeric(sample_sums(physeq_depth1200))
+)
+
+ggplot(seq_depth_df_1200, aes(x = Depth)) +
+  geom_histogram(bins = 30) +
+  scale_x_log10() +
+  labs(x = "Sequencing depth (log10 scale)", y = "Number of samples")+
+  theme_classic()
+#fine. I'm moving on.
+# seqSums_df %>%
+#   dplyr::select(Run, TotalSeqs) %>%
+#   arrange(TotalSeqs)
+num_samples <- nsamples(physeq_depth1200)
+num_samples
+class(physeq_depth1200)
+```
+
+<span style="font-weight: bold;">I've removed anything below 1200 reads. I now have `r num_samples`. The paper had 126. # samples does not change when I filter by 1000 instead. That seems wrong but it is past me. </span>
+
+
+# 8. Write out the data 
+
+Finally, let's save our phyloseq object, which we will use for the next step! 
+
+```{r save-physeq}
+preprocessed_physeq <- 
+  physeq_depth1200
+min(sample_sums(preprocessed_physeq)) #1247??
+# seqSums_df %>%
+#   dplyr::select(Run, TotalSeqs) %>%
+#   arrange(TotalSeqs)
+seqSums_df <- data.frame(
+  Run = names(sample_sums(physeq_depth1200)),
+  TotalSeqs = as.numeric(sample_sums(physeq_depth1200))
+) %>%
+  dplyr::arrange(TotalSeqs)
+seqSums_df #good
+# Please be sure to use the correct path to the appropriate directory in your file system
+save(preprocessed_physeq, file = "/local/workdir/erw98/Brassica_Growth_2026/data/03_PreProcessing/preprocessed_phyloseq.RData")
+```
+
+# Final info for Reproducibility 
+
+## Check Render Time
+```{r stop-time}
+# Take the time now that we are at the end of the script
+end_time <- Sys.time()
+end_time 
+
+# Echo the elapsed time
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+```
+
+## Session Information
+
+```{r session-info}
+# Ensure reproducibility with package version information
+devtools::session_info()
+```
+
+
