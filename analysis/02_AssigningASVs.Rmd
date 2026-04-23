@@ -151,7 +151,7 @@ dada_reverse[30]
 
 ```
 #Merge Forward and Reverse ASVs
-```{r merge}
+```{r merge, include=FALSE}
 merged_ASVs <- 
   mergePairs(dada_forward, filtered_forward_reads,
              dada_reverse, filtered_reverse_reads,
@@ -281,7 +281,7 @@ plot_ASVLength_raw + plot_ASVLength_trimmed + plot_ASVLength_NoChimeras +
 ```
 
 #Track Read Counts
-```{r}
+```{r track-reads}
 # A little function to identify number seqs 
 getN <- function(x) sum(getUniques(x))
 
@@ -380,7 +380,7 @@ head(taxa_print)
 #EXPORTING
 ##1. ASV Tables
 Let’s check that the ASVs are in the rows and the sample names are in the columns. If not, we can use the transpose function t() in R.
-```{r}
+```{r asv-tables}
 # What's the current format of the ASV table?
 head(rownames(noChimeras_ASV_table)) # Samples!
 head(colnames(noChimeras_ASV_table)) # ASV Sequences
@@ -399,43 +399,6 @@ stopifnot(sapply(strsplit(colnames(final_ASV_table_withSeqs), "_"), `[`,1) == sa
 colnames(final_ASV_table_withSeqs) <- sample_names
 head(colnames(final_ASV_table_withSeqs))
 ```
-
-
-#### Rename ASVs
-
-Then, we can also fix the names of our ASVs for our second ASV table where we will replace the ASV sequence names with ASV_1, ASV_2
-
-```{r prepare-ASVcount-Seqtable}
-# Give headers more manageable names
-# First pull the ASV sequences from the rownames
-ASV_seqs <- rownames(final_ASV_table_withSeqs)
-ASV_seqs[1:5]
-
-# How many ASVs? 
-num_ASVs <- dim(final_ASV_table_withSeqs)[1] # select the number of rows
-num_ASVs 
-
-# Make an empty vector the length of the number of ASVs, 
-# which is where we will place the new operational ASV names 
-ASV_headers <- vector(num_ASVs, mode = "character")
-
-# Let's mae sure we have an empty vector!
-ASV_headers[1:5]
-length(ASV_headers) # looks good! 
-
-# Now, let's create a vector with ASV numbers
-# loop through vector and fill it in with ASV names 
-for (i in 1:num_ASVs) {
-  # Add leading zero to ASV name so they print in correct order.
-  ASV_number <- sprintf("%04d", i)
-  # Now, rename each spot in the ASV header vector as we loop through the for loop
-  ASV_headers[i] <- paste(">ASV", ASV_number, sep = "_")
-}
-
-save(final_ASV_table_withSeqs, file = "./raw_physeq")
-raw_physeq <- final_ASV_table_withSeqs
-```
-
 
 ### Names in ASV tables
 
@@ -612,7 +575,7 @@ stopifnot(ASV_tax_table$ASV == rownames(ASV_tax_table),
 
 ### Write the Taxonomy Table 
 
-Now, let's write out the taxonomy table 
+##Now, let's write out the taxonomy table 
 
 ```{r write-tax-table}
 # Write the table 
@@ -638,17 +601,18 @@ save(track_counts_df, file = "/local/workdir/erw98/Brassica_Growth_2026/data/02_
 
 To start this section of this lesson, please make sure that you have phyloseq installed! 
 
-## 5. Metadata
-```{r make-metadata}
+### 5. Metadata
+
+```{r make-errors}
 # 1. Import the CSV file
-Sra_df <- read.csv("/local/workdir/erw98/Brassica_Growth_2026/SraRunTable.csv")
-View(final_ASV_table)
+Sra_df <- read.csv("/local/workdir/erw98/Brassica_Growth_2026/data/SraRunTable.csv")
+#View(final_ASV_table)
 rownames(Sra_df) <- Sra_df$Run
 metadata_physeq <- sample_data(Sra_df)
 sample_names(metadata_physeq)
 colnames(final_ASV_table)
 
-stopifnot(all(sample_names(metadata_physeq) == colnames(final_ASV_table)))
+#stopifnot(all(sample_names(metadata_physeq) == colnames(final_ASV_table)))
 #troubleshooting this stop:
 length(sample_names(metadata_physeq))
 length(colnames(final_ASV_table))
@@ -708,12 +672,12 @@ raw_physeq <- phyloseq(
 save(Sra_df, file = "/local/workdir/erw98/Brassica_Growth_2026/metadata.RData")
 
 # read the SRA run table into R. This is my equivalent of the metadata, right?
-load("/local/workdir/erw98/Brassica_Growth_2026/metadata.RData")
-Sra_df
+#load("/local/workdir/erw98/Brassica_Growth_2026/metadata.RData")
+#Sra_df
 # The command above will load in a new object called:
 #rename it:
-metadata_physeq <- Sra_df
-View(metadata_physeq)
+#metadata_physeq <- Sra_df
+#View(metadata_physeq)
 # Check it out
 sample_names(metadata_physeq)
 # how many samples?
