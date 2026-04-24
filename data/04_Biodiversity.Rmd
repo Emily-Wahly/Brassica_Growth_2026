@@ -431,6 +431,8 @@ shapiro.test(metadata_df$create_date)
 ```
 
 Ok! So, the test above has a p-value <0.05, indicating that we can reject the H₀, which will indicate that the data is **not normal**. Therefore, we need to use non-parametric statistical tests in the data. 
+#None of this runs without numerical data
+#create_date, any other factors?
 
 *Is the richness data normal?*
 
@@ -507,7 +509,7 @@ kw_date
 
 # Salinity by station 
 date_ggboxplot <- 
-  ggboxplot(obs_whole_rich_df, x = "date", y = "experiment", 
+  ggboxplot(obs_whole_rich_df, x = "date", y = "experiment",  #what to put for y instead of station
           color = "date", fill = "date", alpha = 0.3,
           outlier.shape = NA) + 
   # Add points
