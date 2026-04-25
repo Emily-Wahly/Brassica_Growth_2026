@@ -795,16 +795,13 @@ bray_salinity_adonis_terms2
 
 <span style="color: red;">INTERPRETATION #8: Using the above example to guide you, please run the appropriate PERMANOVA for your scientific question and interpret the results. If you have more than one variable of interest, please make sure to run your model in at least two different term orders and comment on whether the R-squared value changes between models. If so, what does this tell you about whether your variables are independent of one another or co-varying? What biological conclusion can you draw from your PERMANOVA results, and do you accept or reject your hypothesis?</span>
 
+I can accept my hypothesis because the PERMANOVA shows significance in variation over abundance. The block factor explains 19% of the variation with an F-statistic of 28. I can conclude that time plays a role in the microbial variation of the plant community.
+
 adonis2(formula = scaled_sorensen_dist ~ block, data = metadata_df, by = "terms")
           Df SumOfSqs      R2      F Pr(>F)    
 block      1    6.463 0.19172 28.464  0.001 ***
 Residual 120   27.247 0.80828                  
 Total    121   33.710 1.00000    
-
-      Df SumOfSqs      R2      F Pr(>F)    
-block      1    5.915 0.15547 22.091  0.001 ***
-Residual 120   32.133 0.84453                  
-Total    121   38.048 1.00000   
 
 
 # 6b. Betadisper: Testing Variances/Dispersions
@@ -943,7 +940,11 @@ If this happens, the results could be written something like: "*Significant diff
 
 <span style="color: red;">INTERPRETATION #9: Using the above example to guide you, run the appropriate betadisper() and permutest() for your scientific question and interpret the results. What biological conclusion can you draw from your dispersion analysis?</span>
 
+There are significant differences among the microbial communities (p=.001). The dispersion test demonstrates that blocks differ in homogeneity: some are tightly clustered and others have a wider spread. These results are consistent across Bray-Curtis and Sorensen analyses, suggesting that both community variability and composition differ between blocks. In context of plant age, this may indicate that the leaf phyllosphere supports vastly differing communities. The change could be due to resource availability, environmental factors, or changes in the microhabitat as the plant develops.
+
 <span style="color: red;">INTERPRETATION #10: Taking into account both the betadisper()/permutest() and the PERMANOVA (adonis2()) test that you ran, what biological conclusion can you draw regarding your data?</span>
+
+The community structure varies significantly across blocks (PERMANOVA, p < 0.001). Both community composition wihtin groups (centroids) and between-group dispersion show variation (betadisper/permutest: Bray–Curtis F = 15.21, p = 0.001; Sorensen F = 20.17, p = 0.001). Block is an important factor in microbiome composition.
 
 
 # Final info for Reproducibility 

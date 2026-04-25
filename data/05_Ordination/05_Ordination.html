@@ -11,7 +11,7 @@
 
 <meta name="author" content="Emily Wahly" />
 
-<meta name="date" content="2026-04-24" />
+<meta name="date" content="2026-04-25" />
 
 <title>Between-Sample (Beta) Diversity of Microbes over Time</title>
 
@@ -1681,7 +1681,7 @@ font-size: 0.95em;
 <h1 class="title toc-ignore">Between-Sample (Beta) Diversity of Microbes
 over Time</h1>
 <h4 class="author">Emily Wahly</h4>
-<h4 class="date">April 24, 2026</h4>
+<h4 class="date">April 25, 2026</h4>
 
 </div>
 
@@ -3189,14 +3189,14 @@ between models. If so, what does this tell you about whether your
 variables are independent of one another or co-varying? What biological
 conclusion can you draw from your PERMANOVA results, and do you accept
 or reject your hypothesis?</span></p>
+<p>I can accept my hypothesis because the PERMANOVA shows significance
+in variation over abundance. The block factor explains 19% of the
+variation with an F-statistic of 28. I can conclude that time plays a
+role in the microbial variation of the plant community.</p>
 <p>adonis2(formula = scaled_sorensen_dist ~ block, data = metadata_df,
 by = “terms”) Df SumOfSqs R2 F Pr(&gt;F)<br />
 block 1 6.463 0.19172 28.464 0.001 *** Residual 120 27.247 0.80828<br />
 Total 121 33.710 1.00000</p>
-<pre><code>  Df SumOfSqs      R2      F Pr(&gt;F)    </code></pre>
-<p>block 1 5.915 0.15547 22.091 0.001 *** Residual 120 32.133
-0.84453<br />
-Total 121 38.048 1.00000</p>
 </div>
 </div>
 <div id="b.-betadisper-testing-variancesdispersions" class="section level1">
@@ -3285,11 +3285,11 @@ expect this to be biologically true.</li>
 </table>
 <div id="sorensen-1" class="section level3">
 <h3>Sorensen</h3>
-<div class="sourceCode" id="cb58"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb58-1"><a href="#cb58-1" tabindex="-1"></a><span class="co"># Homogeneity of Disperson test with beta dispr</span></span>
-<span id="cb58-2"><a href="#cb58-2" tabindex="-1"></a><span class="co"># Sorensen Betadisper - Salinity Group (Categorical) </span></span>
-<span id="cb58-3"><a href="#cb58-3" tabindex="-1"></a>dispr_sorensen_salGroup <span class="ot">&lt;-</span> <span class="fu">betadisper</span>(scaled_sorensen_dist, metadata_df<span class="sc">$</span>block)</span>
-<span id="cb58-4"><a href="#cb58-4" tabindex="-1"></a><span class="co"># permutest() performs a non-parametric permutation test, which is robust and valid for the kind of data used in beta diversity analysis (e.g., dissimilarity matrices).</span></span>
-<span id="cb58-5"><a href="#cb58-5" tabindex="-1"></a><span class="fu">permutest</span>(dispr_sorensen_salGroup)</span></code></pre></div>
+<div class="sourceCode" id="cb57"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb57-1"><a href="#cb57-1" tabindex="-1"></a><span class="co"># Homogeneity of Disperson test with beta dispr</span></span>
+<span id="cb57-2"><a href="#cb57-2" tabindex="-1"></a><span class="co"># Sorensen Betadisper - Salinity Group (Categorical) </span></span>
+<span id="cb57-3"><a href="#cb57-3" tabindex="-1"></a>dispr_sorensen_salGroup <span class="ot">&lt;-</span> <span class="fu">betadisper</span>(scaled_sorensen_dist, metadata_df<span class="sc">$</span>block)</span>
+<span id="cb57-4"><a href="#cb57-4" tabindex="-1"></a><span class="co"># permutest() performs a non-parametric permutation test, which is robust and valid for the kind of data used in beta diversity analysis (e.g., dissimilarity matrices).</span></span>
+<span id="cb57-5"><a href="#cb57-5" tabindex="-1"></a><span class="fu">permutest</span>(dispr_sorensen_salGroup)</span></code></pre></div>
 <pre><code>## 
 ## Permutation test for homogeneity of multivariate dispersions
 ## Permutation: free
@@ -3301,13 +3301,13 @@ expect this to be biologically true.</li>
 ## Residuals 112 2.2028 0.01967                         
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1</code></pre>
-<div class="sourceCode" id="cb60"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb60-1"><a href="#cb60-1" tabindex="-1"></a><span class="co"># Sorensen Betadisper - Date  </span></span>
-<span id="cb60-2"><a href="#cb60-2" tabindex="-1"></a><span class="co"># dispr_sorensen_date &lt;- betadisper(scaled_sorensen_dist, metadata_df$date)</span></span>
-<span id="cb60-3"><a href="#cb60-3" tabindex="-1"></a><span class="co"># permutest(dispr_sorensen_date)</span></span>
-<span id="cb60-4"><a href="#cb60-4" tabindex="-1"></a></span>
-<span id="cb60-5"><a href="#cb60-5" tabindex="-1"></a><span class="co"># Sorensen Betadisper - Salinity PSU (Continuous)</span></span>
-<span id="cb60-6"><a href="#cb60-6" tabindex="-1"></a><span class="co"># dispr_sorensen_salinity &lt;- betadisper(scaled_sorensen_dist, metadata_df$salinity_psu)</span></span>
-<span id="cb60-7"><a href="#cb60-7" tabindex="-1"></a><span class="co"># permutest(dispr_sorensen_salinity)</span></span></code></pre></div>
+<div class="sourceCode" id="cb59"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb59-1"><a href="#cb59-1" tabindex="-1"></a><span class="co"># Sorensen Betadisper - Date  </span></span>
+<span id="cb59-2"><a href="#cb59-2" tabindex="-1"></a><span class="co"># dispr_sorensen_date &lt;- betadisper(scaled_sorensen_dist, metadata_df$date)</span></span>
+<span id="cb59-3"><a href="#cb59-3" tabindex="-1"></a><span class="co"># permutest(dispr_sorensen_date)</span></span>
+<span id="cb59-4"><a href="#cb59-4" tabindex="-1"></a></span>
+<span id="cb59-5"><a href="#cb59-5" tabindex="-1"></a><span class="co"># Sorensen Betadisper - Salinity PSU (Continuous)</span></span>
+<span id="cb59-6"><a href="#cb59-6" tabindex="-1"></a><span class="co"># dispr_sorensen_salinity &lt;- betadisper(scaled_sorensen_dist, metadata_df$salinity_psu)</span></span>
+<span id="cb59-7"><a href="#cb59-7" tabindex="-1"></a><span class="co"># permutest(dispr_sorensen_salinity)</span></span></code></pre></div>
 <p>Response: Distances Df Sum Sq Mean Sq F N.Perm Pr(&gt;F)<br />
 Groups 9 3.5700 0.39666 20.168 999 0.001 *** Residuals 112 2.2028
 0.01967</p>
@@ -3345,9 +3345,9 @@ of unequal dispersion.</li>
 <div id="bray-curtis-1" class="section level2">
 <h2>Bray-Curtis</h2>
 <p>Now, let’s test the same with Bray-Curtis!</p>
-<div class="sourceCode" id="cb61"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" tabindex="-1"></a><span class="co"># Bray-Curtis Betadisper - Salinity Group (Categorical)  </span></span>
-<span id="cb61-2"><a href="#cb61-2" tabindex="-1"></a>dispr_bray_salGroup <span class="ot">&lt;-</span> <span class="fu">betadisper</span>(scaled_bray_dist, metadata_df<span class="sc">$</span>block)</span>
-<span id="cb61-3"><a href="#cb61-3" tabindex="-1"></a><span class="fu">permutest</span>(dispr_bray_salGroup)</span></code></pre></div>
+<div class="sourceCode" id="cb60"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb60-1"><a href="#cb60-1" tabindex="-1"></a><span class="co"># Bray-Curtis Betadisper - Salinity Group (Categorical)  </span></span>
+<span id="cb60-2"><a href="#cb60-2" tabindex="-1"></a>dispr_bray_salGroup <span class="ot">&lt;-</span> <span class="fu">betadisper</span>(scaled_bray_dist, metadata_df<span class="sc">$</span>block)</span>
+<span id="cb60-3"><a href="#cb60-3" tabindex="-1"></a><span class="fu">permutest</span>(dispr_bray_salGroup)</span></code></pre></div>
 <pre><code>## 
 ## Permutation test for homogeneity of multivariate dispersions
 ## Permutation: free
@@ -3359,13 +3359,13 @@ of unequal dispersion.</li>
 ## Residuals 112 1.7990 0.016063                        
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1</code></pre>
-<div class="sourceCode" id="cb63"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" tabindex="-1"></a><span class="co"># # Bray-Curtis Betadisper - Date  </span></span>
-<span id="cb63-2"><a href="#cb63-2" tabindex="-1"></a><span class="co"># dispr_bray_date &lt;- betadisper(scaled_bray_dist, metadata_df$date)</span></span>
-<span id="cb63-3"><a href="#cb63-3" tabindex="-1"></a><span class="co"># permutest(dispr_bray_date)</span></span>
-<span id="cb63-4"><a href="#cb63-4" tabindex="-1"></a><span class="co"># </span></span>
-<span id="cb63-5"><a href="#cb63-5" tabindex="-1"></a><span class="co"># # Bray-Curtis Betadisper - Salinity PSU (Continuous)</span></span>
-<span id="cb63-6"><a href="#cb63-6" tabindex="-1"></a><span class="co"># dispr_bray_salinity &lt;- betadisper(scaled_bray_dist, metadata_df$salinity_psu)</span></span>
-<span id="cb63-7"><a href="#cb63-7" tabindex="-1"></a><span class="co"># permutest(dispr_bray_salinity)</span></span></code></pre></div>
+<div class="sourceCode" id="cb62"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb62-1"><a href="#cb62-1" tabindex="-1"></a><span class="co"># # Bray-Curtis Betadisper - Date  </span></span>
+<span id="cb62-2"><a href="#cb62-2" tabindex="-1"></a><span class="co"># dispr_bray_date &lt;- betadisper(scaled_bray_dist, metadata_df$date)</span></span>
+<span id="cb62-3"><a href="#cb62-3" tabindex="-1"></a><span class="co"># permutest(dispr_bray_date)</span></span>
+<span id="cb62-4"><a href="#cb62-4" tabindex="-1"></a><span class="co"># </span></span>
+<span id="cb62-5"><a href="#cb62-5" tabindex="-1"></a><span class="co"># # Bray-Curtis Betadisper - Salinity PSU (Continuous)</span></span>
+<span id="cb62-6"><a href="#cb62-6" tabindex="-1"></a><span class="co"># dispr_bray_salinity &lt;- betadisper(scaled_bray_dist, metadata_df$salinity_psu)</span></span>
+<span id="cb62-7"><a href="#cb62-7" tabindex="-1"></a><span class="co"># permutest(dispr_bray_salinity)</span></span></code></pre></div>
 <p>Response: Distances Df Sum Sq Mean Sq F N.Perm Pr(&gt;F)<br />
 Groups 9 2.1988 0.244314 15.21 999 0.001 *** Residuals 112 1.7990
 0.016063</p>
@@ -3485,29 +3485,44 @@ within-group variability.</em>”</p>
 to guide you, run the appropriate betadisper() and permutest() for your
 scientific question and interpret the results. What biological
 conclusion can you draw from your dispersion analysis?</span></p>
+<p>There are significant differences among the microbial communities
+(p=.001). The dispersion test demonstrates that blocks differ in
+homogeneity: some are tightly clustered and others have a wider spread.
+These results are consistent across Bray-Curtis and Sorensen analyses,
+suggesting that both community variability and composition differ
+between blocks. In context of plant age, this may indicate that the leaf
+phyllosphere supports vastly differing communities. The change could be
+due to resource availability, environmental factors, or changes in the
+microhabitat as the plant develops.</p>
 <p><span style="color: red;">INTERPRETATION #10: Taking into account
 both the betadisper()/permutest() and the PERMANOVA (adonis2()) test
 that you ran, what biological conclusion can you draw regarding your
 data?</span></p>
+<p>The community structure varies significantly across blocks
+(PERMANOVA, p &lt; 0.001). Both community composition wihtin groups
+(centroids) and between-group dispersion show variation
+(betadisper/permutest: Bray–Curtis F = 15.21, p = 0.001; Sorensen F =
+20.17, p = 0.001). Block is an important factor in microbiome
+composition.</p>
 </div>
 </div>
 <div id="final-info-for-reproducibility" class="section level1">
 <h1>Final info for Reproducibility</h1>
 <div id="check-render-time" class="section level2">
 <h2>Check Render Time</h2>
-<div class="sourceCode" id="cb64"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb64-1"><a href="#cb64-1" tabindex="-1"></a><span class="co"># Take the time now that we are at the end of the script</span></span>
-<span id="cb64-2"><a href="#cb64-2" tabindex="-1"></a>end_time <span class="ot">&lt;-</span> <span class="fu">Sys.time</span>()</span>
-<span id="cb64-3"><a href="#cb64-3" tabindex="-1"></a>end_time </span></code></pre></div>
-<pre><code>## [1] &quot;2026-04-24 23:00:29 EDT&quot;</code></pre>
-<div class="sourceCode" id="cb66"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb66-1"><a href="#cb66-1" tabindex="-1"></a><span class="co"># Echo the elapsed time</span></span>
-<span id="cb66-2"><a href="#cb66-2" tabindex="-1"></a>elapsed_time <span class="ot">&lt;-</span> <span class="fu">round</span>((end_time <span class="sc">-</span> start_time), <span class="dv">3</span>)</span>
-<span id="cb66-3"><a href="#cb66-3" tabindex="-1"></a>elapsed_time</span></code></pre></div>
-<pre><code>## Time difference of 13.996 secs</code></pre>
+<div class="sourceCode" id="cb63"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" tabindex="-1"></a><span class="co"># Take the time now that we are at the end of the script</span></span>
+<span id="cb63-2"><a href="#cb63-2" tabindex="-1"></a>end_time <span class="ot">&lt;-</span> <span class="fu">Sys.time</span>()</span>
+<span id="cb63-3"><a href="#cb63-3" tabindex="-1"></a>end_time </span></code></pre></div>
+<pre><code>## [1] &quot;2026-04-25 09:58:22 EDT&quot;</code></pre>
+<div class="sourceCode" id="cb65"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb65-1"><a href="#cb65-1" tabindex="-1"></a><span class="co"># Echo the elapsed time</span></span>
+<span id="cb65-2"><a href="#cb65-2" tabindex="-1"></a>elapsed_time <span class="ot">&lt;-</span> <span class="fu">round</span>((end_time <span class="sc">-</span> start_time), <span class="dv">3</span>)</span>
+<span id="cb65-3"><a href="#cb65-3" tabindex="-1"></a>elapsed_time</span></code></pre></div>
+<pre><code>## Time difference of 14.319 secs</code></pre>
 </div>
 <div id="session-information" class="section level2">
 <h2>Session Information</h2>
-<div class="sourceCode" id="cb68"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb68-1"><a href="#cb68-1" tabindex="-1"></a><span class="co"># Ensure reproducibility with package version information</span></span>
-<span id="cb68-2"><a href="#cb68-2" tabindex="-1"></a>devtools<span class="sc">::</span><span class="fu">session_info</span>()</span></code></pre></div>
+<div class="sourceCode" id="cb67"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb67-1"><a href="#cb67-1" tabindex="-1"></a><span class="co"># Ensure reproducibility with package version information</span></span>
+<span id="cb67-2"><a href="#cb67-2" tabindex="-1"></a>devtools<span class="sc">::</span><span class="fu">session_info</span>()</span></code></pre></div>
 <pre><code>## ─ Session info ───────────────────────────────────────────────────────────────
 ##  setting  value
 ##  version  R version 4.2.3 (2023-03-15)
@@ -3518,7 +3533,7 @@ data?</span></p>
 ##  collate  en_US.UTF-8
 ##  ctype    en_US.UTF-8
 ##  tz       America/New_York
-##  date     2026-04-24
+##  date     2026-04-25
 ##  pandoc   3.1.1 @ /usr/lib/rstudio-server/bin/quarto/bin/tools/ (via rmarkdown)
 ## 
 ## ─ Packages ───────────────────────────────────────────────────────────────────
