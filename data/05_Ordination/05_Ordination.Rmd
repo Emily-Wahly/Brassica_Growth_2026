@@ -1,0 +1,967 @@
+---
+title: "Between-Sample (Beta) Diversity of Microbes over Time"
+author: "Emily Wahly"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document: 
+    code_folding: show
+    theme: spacelab
+    highlight: pygments
+    keep_md: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+      toc_depth: 3
+  keep_md: true  
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      fig.path = "/local/workdir/erw98/Brassica_Growth_2026/figures/05_Ordination/")
+```
+
+# Goals 
+
+1. Load in phyloseq data with rooted tree & colors and functions.  
+2. Evaluate sequencing depth and remove samples, if needed.  
+3. Normalize the read counts between samples.  
+4. Calculate community **dis**similarities. Numbers between 0 and 1. If 0, completely similar versus if they are 1, then they're completely dissimilar.   
+    a. **Sorensen**: Shared Species as a binary value: Abundance-unweighted 
+    b. **Bray-Curtis**: Shared Abundant species: Abundance-weighted
+    c. **(Abundance-)Weighted UNIFRAC**: Consider Abundant Species and where they fall on the tree  
+5. Visualize the community data with two unconstrained Ordinations:  
+    a. **PCoA**: Linear Method. Eigenvalue = how much variation is explained by each axis. Choose to view axis 1, 2, 3, etc. and plot them together.  
+    b. **NMDS**: Non-linear. Smush multiple Dimensions into 2 or 3 axes. Need to report Stress value (ideally <0.15).
+6. Run statistics with functions from the vegan R package: 
+    a. PERMANOVA with `adonis2()`.
+    b. betadispR with `betadisper()` and `permutest()`. 
+
+## Inputs 
+
+1. We will need the `preprocessed_physeq.RData` created in `analysis/03_PreProcessing`. 
+
+## Outputs 
+
+1. Calculated beta-diversity dissimilarity measures (*e.g.* Sorensen, Bray-Curtis, abundance-unweighted and -weighted UniFrac) across every sample. 
+2. Ordination figures (*i.e.,* PCoA/NMDS) to include in the scientific paper that visualize the data as it relates to the scientific question.
+3. Statistical tests (*i.e.,* PERMANOVA & betadisper) conveying the measured and quantified changes and patterns in biodiversity.
+
+# Scientific Question 
+
+
+
+<span style="color: red;">INTERPRETATION #1:  What is your scientific question and hypotheses? Do they relate to abundance-unweighted (presence-absence) or abundance-weighted (relative abundance) metrics?</span>
+
+How does microbial composition change over the 10 sampling periods?
+
+- *Null Hypothesis:* Microbial composition (*e.g.* Sorensen, Bray-Curtis, abundance-unweighted and -weighted UniFrac) does not change.
+- *Alternative #1 Hypothesis:* Microbial composition (*e.g.* Sorensen, Bray-Curtis, abundance-unweighted and -weighted UniFrac) will become more dissimilar over time. Species presence will change over time.
+
+I am doing abundance-unweighted analysis because I want to see if the overall number of taxa changes and if the present species change.
+
+
+# Set up 
+
+## Timing of this script
+
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+## Set the seed
+
+```{r set-seed}
+set.seed(238428)
+```
+
+## Load Packages, colors & functions  
+```{r load-packages}
+pacman::p_load(tidyverse, devtools, phyloseq, patchwork, vegan, 
+               install = FALSE)
+
+# Load Colors 
+source("/local/workdir/in_class_data/colors_and_shapes.R")
+# Load functions 
+source("/local/workdir/in_class_data/functions.R")
+
+```
+
+# 1. Load in the data 
+
+```{r load-data}
+# load phyloseq object
+load("/local/workdir/erw98/Brassica_Growth_2026/data/03_PreProcessing/preprocessed_phyloseq.RData")
+
+# take a look at it! 
+preprocessed_physeq
+
+# Intuition check on seq depth
+min(sample_sums(preprocessed_physeq)) #1247 (consistent)
+```
+
+## Remove outlier sample
+I do not do this
+
+```{r rm-outlier, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# preprocessed_physeq <- 
+#   preprocessed_physeq %>%
+#   subset_samples(names != "20210615-MA-ABB2F") %>%
+#   # And remove any ASVs unique to this sample, just in case.
+#   prune_taxa(taxa_sums(.) > 0, .)
+
+# Check that we now have 88 samples 
+preprocessed_physeq
+```
+```{r make-metadata}
+# Create Metadata_df 
+metadata_df <- 
+  preprocessed_physeq %>%
+  sample_data() %>%
+  data.frame()
+```
+
+# Normalizing the Read Depth 
+
+## 2. Explore the Raw Read Counts 
+
+```{r explore-raw-read-counts, fig.width=6, fig.height=3}
+# calculate read counts per sample 
+raw_TotalSeqs_df <- 
+  preprocessed_physeq %>%
+  # Calculate the total number of sequences/reads
+  sample_sums() %>%
+  data.frame()
+
+# Take a look 
+head(raw_TotalSeqs_df)
+
+# Rename the column 
+colnames(raw_TotalSeqs_df)[1] <- "TotalSeqs"
+
+# add a new column of num_ASVs (RAW, non-noramlized # ASVs)
+raw_TotalSeqsASVs_df <- 
+  raw_TotalSeqs_df %>%
+  mutate(num_ASVs = colSums(otu_table(preprocessed_physeq) > 1))
+
+#View(raw_TotalSeqsASVs_df)
+
+# Plot histogram of seq depth 
+rawSeq_histogram <- 
+  raw_TotalSeqsASVs_df %>%
+  ggplot(aes(x = TotalSeqs)) + 
+  geom_histogram(bins = 50) + 
+  scale_x_continuous(limits = c(0, 8000)) + 
+  labs(title = "Raw Seq Depth Histogram") + 
+  theme_bw()
+
+# Plot Seq Depth versus num_ASVs
+rawSeq_vs_numASV_plot <- 
+  raw_TotalSeqsASVs_df %>%
+  ggplot(aes(x = num_ASVs, y = TotalSeqs)) + 
+  geom_point() + 
+  scale_y_continuous(limits = c(0, 8000)) +
+  geom_smooth(method = "lm") + 
+  labs(title = "Raw Seq Depth vs # ASVs") + 
+  theme_bw()
+
+# is it significant? 
+summary(lm(TotalSeqs ~ num_ASVs, data = raw_TotalSeqsASVs_df))
+#no?
+
+# Put the two plots together.
+rawSeq_histogram + rawSeq_vs_numASV_plot +
+  plot_annotation(tag_levels = "A")
+```
+
+<span style="color: red;">INTERPRETATION #2:  Evaluate the raw read count plots above. What did you scale the read counts to in your dataset? Why did you choose that number? What are the potential consequences of this scaling decision for your downstream beta-diversity comparisons?</span>
+
+I checked the plot scale up to 60,000 and saw that there is a long tail with <2 counts, so I moved the axis back down to 8000. The majority of samples are around 4500 seqs. This means I lose some data but still have sufficient coverage. Rarefraction is a bias-creating step. It can affect richness because this removes low-depth reads which are sometimes rare taxa, and this influences Bray-Curtis (abundance weighted) and Jaccard (presence/absence).
+
+# 3. Scale Read Counts 
+
+```{r scale-reads, fig.width=6, fig.height=3}
+min(sample_sums(preprocessed_physeq))
+
+# Scale the reads 
+scaled_physeq <- 
+  preprocessed_physeq %>%
+  scale_reads(round = "matround")
+
+# Look at it 
+scaled_physeq
+
+# Look at it more!
+#View(data.frame(otu_table(preprocessed_physeq)))
+#View(data.frame(otu_table(scaled_physeq)))
+#cool!
+
+# Confirm seq read depth of scaled_physeq 
+scaled_TotalSeqs_df <- 
+  scaled_physeq %>%
+  sample_sums() %>%
+  data.frame()
+
+colnames(scaled_TotalSeqs_df)[1] <- "TotalSeqs"
+
+# add a new column of num_ASVs (RAW, non-noramlized # ASVs)
+scaled_TotalSeqsASVs_df <- 
+  scaled_TotalSeqs_df %>%
+  mutate(num_ASVs = colSums(otu_table(scaled_physeq) > 1))
+
+# Plot it! 
+scaledSeq_histogram <- 
+  scaled_TotalSeqs_df %>%
+  ggplot(aes(x = TotalSeqs)) + 
+  geom_histogram(bins = 50) + 
+  labs(title = "Scaled Seq Depth Histogram") + 
+  scale_x_continuous(limits = c(0, 8000)) + 
+  theme_bw()
+
+# Scaling always gives us a range! 
+# MInimum sequences
+min(scaled_TotalSeqs_df$TotalSeqs) 
+# Total Range 
+range(scaled_TotalSeqs_df) 
+# How many is that range? 
+#1233 1258
+range_seqs <- (max(scaled_TotalSeqs_df$TotalSeqs) - min(scaled_TotalSeqs_df$TotalSeqs))
+range_seqs #25
+# And in terms of percent? 
+range_seqs/max(scaled_TotalSeqs_df$TotalSeqs)*100 #1.9%
+#View(scaled_TotalSeqs_df)
+
+# Set the axis min and max for the next plot 
+max_y <- max(scaled_TotalSeqs_df$TotalSeqs) + 10
+min_y <- min(scaled_TotalSeqs_df$TotalSeqs) - 10
+
+# Now, draw the plot 
+scaledSeq_vs_numASV_plot <- 
+  scaled_TotalSeqsASVs_df %>%
+  ggplot(aes(x = num_ASVs, y = TotalSeqs)) + 
+  geom_point() + 
+  scale_y_continuous(limits = c(min_y, max_y)) +
+  #geom_smooth(method = "lm") + 
+  theme_bw() + 
+  labs(title = "Scaled Seq Depth vs # ASVs")
+
+# Put the two plots together.
+scaledSeq_histogram + scaledSeq_vs_numASV_plot +
+  plot_annotation(tag_levels = "A")
+#OKAY
+```
+
+<span style="color: red;">INTERPRETATION #3:  Evaluate the scaled read count plots above. Are the total number of sequences across all of your samples in the same general range? What is the minimum and maximum (i.e., the range) of the sequencing depth? What does this tell you about the relationship between sequencing depth and the observed number of ASVs?</span>
+
+Range of 25 between 1233-1258. The narrow sequencing depth is good? All the samples have nearly identical read counts, so yes, they are in the same range. My scatterplot has no slope/trend, which is also good because it means the ASV : Seq relationship is not caused by my filtering.
+
+## Save Scaled Reads
+
+Please do not forget to save your phyloseq object here for the compositional analysis in our final step! 
+
+```{r save-scaled-reads}
+save(scaled_physeq, file = "/local/workdir/erw98/Brassica_Growth_2026/data/05_Ordination/scaled_physeq.RData")
+
+
+```
+
+# Beta Diversity: Dissimilarity Metrics in Microbial Ecology
+
+## Similarity versus Dissimilarity
+
+In microbial ecology, **beta diversity** refers to the **similiarty or dissimilarity**, which represent the unique-ness between two microbial community samples. (Dis)similarity values range from **0 to 1**:
+
+- **Similarity**: Values close to 1 = communities are the same whereas 0 = completely different communities. 
+- **Dissimilarity**: Values close to 1 = the communities are unique whereas 0 refers to identical communities. 
+
+Most ecological studies and ordination plots use **dissimilarity**. For some metrics like Jaccard and Sorensen, you’ll see formulas written as similarity—but it's easy to convert them. 
+
+Different dissimilarity metrics emphasize different aspects of community differences—such as presence/absence, abundance, or evolutionary relatedness (phylogeny). Choosing the right metric depends on your scientific question! It is up to us as data analysts to run each of these dissimilarities on our microbial community samples. This multi-faceted approach will provide a multifaceted view of our microbial communities of interest.
+
+### Why do most ecological studies use **dissimilarity**?
+
+In short: dissimilarity tells us how different things are—just like distance. That’s why it’s the default for ordination, clustering, and most ecological statistics. Most ecological studies and ordination plots use dissimilarity (instead of similarity) for several practical and conceptual reasons:
+
+1. **Distance = Difference is an intuitive interpretation**: In ecological studies, dissimilarity is more commonly used than similarity because it aligns more naturally with how we interpret spatial relationships and ecological gradients. Dissimilarity measures provide a sense of how far apart two communities are in terms of their species composition, abundance, or evolutionary history (*remember, this depends on our dissimilarity metric!*). This framing is intuitive: the more dissimilar two samples are, the greater the distance between them in ecological space. nice.
+
+2. **Ordination methods are built for distances:** Ordination methods such as **Principal Coordinates Analysis (PCoA)** and **Non-metric Multidimensional Scaling (NMDS)** (*more on this below!*) are specifically designed to work with dissimilarity (or distance) matrices. These techniques use dissimilarity values to position samples in a low-dimensional space where the distance between points reflects how different the communities are. This makes it easy to visualize clustering patterns, gradients, or dispersions among samples. If we were to use similarity instead, we’d have to invert or transform the values to interpret them spatially, which can introduce confusion. ugh! no way
+
+3. **Avoids ambiguity in similiarty scaling**: Using dissimilarity also avoids ambiguity in scaling. While similarity values like 0.8 or 0.9 may indicate that two samples are quite alike, they don't translate as directly to spatial relationships. In contrast, a dissimilarity of 0.2 is straightforward—it tells us that the communities are relatively close, and a value of 0.8 signals they are far apart. This linear and spatial logic makes dissimilarity the more practical choice for ecological analyses. fair...
+
+4. **Consistency across fields and tools**: Moreover, dissimilarity metrics are the standard input for most statistical and visualization tools used in microbial ecology, including software packages like QIIME2, phyloseq, and vegan in R. These tools assume you're comparing how different communities are from one another, not how similar they are. As a result, dissimilarity-based approaches are not only easier to interpret but also more compatible with existing methods and workflows.
+
+5. **Easier to identify ecological gradients**: Therefore, dissimilarity measures dominate ecological studies and visualizations because they match how we interpret differences in space, work seamlessly with ordination and clustering methods, and provide a clear, consistent framework for understanding ecological patterns. great thnx
+
+
+## Common dissimilarity measures
+
+### How do I choose the right dissimilarity metric?
+
+| Scientific Question                                                             | Recommended Metric(s)              |
+|----------------------------------------------------------------------------------|------------------------------------|
+| Do the two environments share the same microbes, regardless of abundance?       | Jaccard, Sorensen             |
+| How does abundance differ between communities?                                   | Bray-Curtis                        |
+| Are there differences in the evolutionary history of microbes between samples?  | UniFrac (unweighted or weighted)   |
+| Do dominant, evolutionarily distinct microbes vary in abundance?                | Weighted UniFrac                   |
+
+Bray or Jaccard
+Choosing the right dissimilarity measure starts with understanding what aspect of community difference you're trying to capture. If you're asking whether two environments simply contain the same taxa—regardless of how abundant those taxa are—then presence/absence-based measures like **Jaccard** or **Sorensen-Dice** are appropriate. These metrics are particularly useful when working with rarefied data, or when you're more concerned with community membership than abundance.
+
+If you're interested in how **abundant** different taxa are across communities—especially if dominant taxa may be ecologically important—then an abundance-based metric like **Bray-Curtis** is a better choice. Bray-Curtis emphasizes changes in relative abundance and is sensitive to shifts in dominant taxa, making it useful for studying processes like competitive exclusion or resource-driven community turnover.
+
+When your data include **phylogenetic information**—for example, from 16S rRNA gene amplicon sequencing—you may want to use **UniFrac** metrics. **Unweighted UniFrac** is good for detecting evolutionary differences based on presence/absence (i.e., whether the communities harbor different lineages), while **Weighted UniFrac** incorporates both **phylogeny and abundance**, allowing you to explore whether communities differ in their evolutionary makeup **and** in the dominance of certain lineages. These are especially useful when you care about deep evolutionary divergence or when function may correlate with phylogeny.
+
+Practical considerations also matter. For example, UniFrac requires a phylogenetic tree, which takes time and computation to build; Bray-Curtis and Jaccard don’t. Some metrics are also more sensitive to sampling depth and rare taxa, so normalization or rarefaction methods may be necessary before analysis.
+
+In short, let your **ecological question** guide your metric choice: use **presence/absence** metrics to assess "who's there," **abundance-based** metrics to examine "how much is there," and **phylogenetic** metrics to explore "how evolutionarily different are these communities." Often, using **multiple metrics in parallel** can help reveal different facets of the data and strengthen your ecological interpretations.
+
+These dissimilarity measures are foundational tools in microbial ecology and are often visualized using **ordination methods** (e.g., PCoA, NMDS) to interpret community shifts across environments, treatments, or gradients.
+
+| Metric              | Type                | Similarity Formula | Dissimilarity Formula       | Uses Abundance | Uses Phylogeny |
+|---------------------|---------------------|--------------------|-----------------------------|----------------|----------------|
+| Jaccard             | Presence/absence    | \( \frac{A}{A+B+C} \) | \( \frac{B+C}{A+B+C} \)     | ❌             | ❌             |
+| Sorensen-Dice       | Presence/absence    | \( \frac{2A}{2A+B+C} \) | \( \frac{B+C}{2A+B+C} \)     | ❌             | ❌             |
+| Bray-Curtis         | Abundance-based     | —                  | \( \frac{\sum |a_i - b_i|}{\sum (a_i + b_i)} \) | ✅ | ❌ |
+| Unweighted UniFrac  | Phylogenetic + presence/absence | — | \( \frac{\text{unique branch}}{\text{total branch}} \) | ❌ | ✅ |
+| Weighted UniFrac    | Phylogenetic + abundance-based | — | \( \frac{\text{weighted unique branch}}{\text{total branch}} \) | ✅ | ✅ |
+
+## Five Types of Dissimilarities
+
+### A. Jaccard Dissimilarity
+
+- **Type:** Presence/absence
+- **Formula:**  
+  \[
+  D_J = \frac{B + C}{A + B + C}
+  \]
+  Where:  
+  - *A* = number of taxa shared by both samples  
+  - *B* = taxa unique to sample 1  
+  - *C* = taxa unique to sample 2
+
+- **Interpretation:** Measures dissimilarity in community **membership**—i.e., how many taxa are **not shared** between the samples.
+
+- **Ecological question:**  *How unique are the species between two communities, ignoring abundance?*
+
+### B. Sorensen-Dice Dissimilarity
+
+- **Type:** Presence/absence (weighted toward shared taxa)
+- **Similarity formula**:  
+  \[
+  S_S = \frac{2A}{2A + B + C}
+  \]
+- **Dissimilarity formula**:  
+  \[
+  D_S = 1 - S_S = \frac{B + C}{2A + B + C}
+  \]
+
+- **Interpretation:** Similar to Jaccard, but gives **greater weight to shared taxa**, making it more sensitive to overlap in community membership. The Sorensen-Dice is mathematically similar to Bray-Curtis, which makes it a nice side-by-side comparison with Bray-Curtis. 
+
+- **Ecological question:** *To what extent do two communities differ in presence/absence, giving extra credit for shared species?*
+
+### C. Bray-Curtis Dissimilarity
+
+- **Type:** Abundance-based
+- **Formula:**  
+  \[
+  BC_{AB} = \frac{\sum_{k=1}^{S} \left| x_{Ak} - x_{Bk} \right|}{\sum_{k=1}^{S} \left( x_{Ak} + x_{Bk} \right)}
+  \]
+  Where:  
+  - \( BC_{AB} \): Bray-Curits dissimilarity between sample **A** and sample **B**.
+  - *S*: Total number of species or ASVs.
+  - \( x_{Ak} \): Abundance of species *k* in sample **A**  
+  - \( x_{Bk} \): Abundance of species *k* in sample **B**
+
+- **Interpretation:** Quantifies dissimilarity based on **abundance differences**—especially sensitive to changes in dominant taxa. Often, it is run together with the Sorensen-Dice dissimilarity as these two metrics are mathematically similar. 
+
+- **Ecological question:** *How different are two communities in terms of the* ***abundance*** *of shared and unique taxa?*
+
+### D. Unweighted UniFrac Dissimilarity
+
+- **Type:** Phylogenetic, presence/absence
+- **Formula (conceptual):**  
+  \[
+  D_{UU} = \frac{\text{Unique branch length}}{\text{Total branch length}}
+  \]
+
+- **Interpretation:** Measures the proportion of **phylogenetic branch lengths** that are unique to either sample, ignoring abundance. This measure requires a curated and a rooted tree, ideally within a meaningful outgroup, like the Archaea. The curation and visual inspection of the tree is important as this metric is very sensitive to long branches! Therefore, we need to do our diligence with the quality of our input tree. 
+
+- **Ecological question:**  *How evolutionarily distinct are the community members between samples, regardless of how abundant they are?*
+
+### E. Weighted UniFrac Dissimilarity
+
+- **Type:** Phylogenetic, abundance-weighted
+- **Formula (conceptual):**  
+  \[
+  D_{WU} = \frac{\text{Abundance-weighted unique branch length}}{\text{Total branch length}}
+  \]
+
+- **Interpretation:** Combines **phylogeny and abundance**—emphasizes both how evolutionarily distinct and how **numerically different** the communities are, giving more weight to abundant taxa. This measure requires a curated and a rooted tree, ideally within a meaningful outgroup, like the Archaea. The curation and visual inspection of the tree is important as this metric is very sensitive to long branches! Therefore, we need to do our diligence with the quality of our input tree. 
+
+- **Ecological question:** *How much do two communities differ in the* ***abundance of evolutionarily distinct*** *lineages?*
+
+# 4. Calculating dissimilarity
+
+Now, let's make distance objects of each of the dissimiliarity measures above! 
+
+```{r calc-dissimilarity}
+# Sorensen Dissimiliarty
+scaled_sorensen_dist <- phyloseq::distance(scaled_physeq, method = "bray", binary = TRUE)
+
+# What does it look like? 
+class(scaled_sorensen_dist)
+str(scaled_sorensen_dist)
+#head(as.matrix(scaled_sorensen_dist))
+
+# Bray-Curtis Dissimiliarty
+scaled_bray_dist <- phyloseq::distance(scaled_physeq, method = "bray", binary = FALSE)
+
+# Abundance-Unweighted UniFrac
+#scaled_uUnifrac_dist <- phyloseq::distance(scaled_physeq, method = "unifrac")
+
+# Abundance-Weighted UniFrac
+#scaled_wUnifrac_dist <- phyloseq::distance(scaled_physeq, method = "wunifrac")
+```
+
+<span style="color: red;">INTERPRETATION #4:  Which dissimilarity metric is most related to your scientific question? Why or why not?</span>
+
+I'm thinking Sorensen since the leaf phyllosphere should have mostly the same microbes. Sorensen considers overlap and gives a lower diversity score for it. It is also an abundance metric, so I can see changes in taxa as part of my composition question. Then I would like to run the Bray-Curtis where blocks are the equivalent of sites? This will help answer if there are overall more microbes on the leaf at any growth stage, and it will show if there are changes in the abundance of dominant species. This is not absolute abundance since I rarefied (thus normalized), right?
+
+# 5. Visualize Community Dissimilarity with Ordination
+
+## What are ordination methods? 
+
+**TLDR: Ordination = dimensionality reduction for complex ecological data.**
+
+**Ordination methods** are a family of multivariate statistical techniques used to reduce the dimensionality of complex datasets and visualize patterns of similarity or dissimilarity among samples. In microbial ecology and community ecology more broadly, ordination helps reveal how microbial communities differ across samples based on environmental gradients, treatments, or other metadata.
+
+Microbial community data (*e.g.,* 16S rRNA, metagenomics) often involve thousands of taxa across dozens to hundreds of samples. Ordination condenses this complexity into 2–3 axes that capture the main trends in community variation, allowing you to:
+
+- Visualize clustering of similar samples
+- Assess gradients (*e.g.,* nutrient, salinity, time)
+- Explore community response to treatments or environments
+
+##  Key Types of Ordination Methods
+
+Please see the [Paliy & Shankar (2016)](https://onlinelibrary.wiley.com/doi/10.1111/mec.13536) paper for a great background and overview of various ordination methods. In summary: 
+
+| Method                         | Type                          | Preserves                         | Typical Use Case                                                      |
+|-------------------------------|-------------------------------|-----------------------------------|------------------------------------------------------------------------|
+| **PCA** (Principal Component Analysis)       | Linear, metric                | Euclidean distances               | Abundance data, normalized counts                                     |
+| **PCoA** (Principal Coordinates Analysis)    | Metric                        | Any dissimilarity metric          | Bray-Curtis, Jaccard, UniFrac; interpretable axes                     |
+| **NMDS** (Non-metric Multidimensional Scaling) | Non-metric                    | Rank order of dissimilarities     | Complex, nonlinear ecological data; robust to outliers                |
+| **CA** (Correspondence Analysis)             | Linear, unimodal response     | Chi-squared distances             | Species-by-site tables; assumes unimodal species response curves      |
+| **CCA** (Canonical Correspondence Analysis)  | Constrained ordination        | Unimodal + environmental drivers  | Explains variation using environmental variables                      |
+| **RDA** (Redundancy Analysis)                | Constrained ordination        | Linear + environmental drivers    | Like PCA but incorporates environmental predictors (e.g., pH, salinity) |
+
+
+In practice, the most common ordination methods in microbial ecology are: 
+
+1. **PCoA** - Eigen-based analysis, linear, axis coefficients are meaningful because they represent the eigenvectors. 
+2. **NMDS** - Non-linear method, axes are not meaningful, smush many axes of data into 2 axes 
+
+| Aspect                      | PCoA                                       | NMDS                                       |
+|-----------------------------|--------------------------------------------|--------------------------------------------|
+| **Basis**                   | Metric ordination (preserves distances)    | Non-metric (preserves rank order)          |
+| **Output**                  | Axes with eigenvalues (% variance explained)| Configuration with stress value            |
+| **Assumptions**             | Assumes distances can be represented in Euclidean space; may require transformation for non-Euclidean distances | No assumptions about linearity; focuses on rank ordering |
+| **Advantages**              | Quantitative variance breakdown; interpretable axes | Robust to outliers and non-linear relationships; flexible with various distance measures |
+| **Limitations**             | Sensitive to outliers; negative eigenvalues possible with certain distance metrics  | Axes are arbitrary; requires iterative optimization and multiple runs for stable solution |
+| **Usage in Microbial Ecology** | Good when variance explained is important and distances meet metric assumptions | Often preferred for complex, non-linear ecological data where relative relationships are key |
+
+not cca or pca because no environmental factor
+
+## 5a. PCoA: Principal Coordinates Analysis
+
+**PCoA**,starts with a distance (or dissimilarity) matrix calculated from microbial community data (e.g., Bray-Curtis, Jaccard) and then uses eigen decomposition to project samples into a low-dimensional space (typically 2 or 3 dimensions). PCoA is a metric technique—it strives to preserve the actual distances between samples. In other words, if two samples are very dissimilar in the original space, PCoA will represent them as far apart in the ordination.
+
+**PCoA is eigen-based:** The method produces **eigenvalues** for each coordinate, which can be interpreted as the proportion of total variation explained by that axis. This lets you assess how well the low-dimensional space represents your data.
+
+- **Eigenvalues** provide a quantitative measure of the variance captured by each dimension, which is useful for comparing ordination axes. Since it’s based on actual distances, interpretations (like “X% of variation explained”) can be directly tied to the original dissimilarity metrics.
+    - Eigenvalues tell us how well our ordination captures the variability in beta diversity.
+    - For example: If Axis 1 has an eigenvalue that explains 40% of the variation, and Axis 2 explains 20%, then plotting samples in 2D shows 60% of the total variation in the data.
+- **Eigenvectors** Provide the coordinates of each sample along each PCoA axis (dimension). These coordinates are what is plotted in an ordination plot (*e.g.,* sample 1 at x = 0.2, y = -0.5). Therefore, the distances between points in the ordination plot approximate the original dissimilarities between samples.
+    - Eigenvectors tell us where each sample falls along major ecological gradients (e.g., salinity, oxygen, host association), even if those gradients are not explicitly labeled.
+
+| Term          | What it means                                 | Why it matters                                                              |
+|---------------|-----------------------------------------------|-----------------------------------------------------------------------------|
+| **Eigenvalue** | Variance explained by each PCoA axis          | Indicates how much of the community variation is captured by each dimension |
+| **Eigenvector** | Coordinates of each sample on each axis       | Determines sample placement in the ordination plot; used for visualizing similarity/dissimilarity |
+
+
+```{r pcoa-plots, fig.height=3.5, fig.width=7}
+### SORENSEN 
+sample_data(scaled_physeq)$block <- 
+  factor(as.character(sample_data(scaled_physeq)$block))
+
+sample_data(scaled_physeq)$create_date <- 
+  factor(as.character(sample_data(scaled_physeq)$create_date))
+# First, calculate PCoA with Soresen
+scaled_soren_pcoa <- 
+  ordinate(physeq = scaled_physeq,
+         method = "PCoA",
+         distance = "bray", binary = TRUE)
+
+# Take a quick look
+str(scaled_soren_pcoa)
+
+# Plot it: Sorensen PCoA  
+sorensen_pcoa_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                ordination = scaled_soren_pcoa,
+                color = "block",
+                shape = "create_date",
+                title = "Sorensen PCoA") + 
+ # scale_color_manual(values = salinity_colors) + 
+ # scale_shape_manual(values = date_shapes) + 
+  geom_point(size = 5, alpha = 0.5)+ 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+
+### Bray-Curtis 
+# Second, calculate PCoA with Bray-Curtis
+scaled_bray_pcoa <- 
+  ordinate(physeq = scaled_physeq,
+         method = "PCoA",
+         distance = "bray", binary = FALSE)
+
+# Plot it: Bray-Curtis PCoA 
+bray_pcoa_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                ordination = scaled_bray_pcoa,
+                color = "block",
+                shape = "create_date",
+                title = "Bray-Curtis PCoA") + 
+ # scale_color_manual(values = ) + 
+ # scale_shape_manual(values = create_date) + 
+  geom_point(size = 5, alpha = 0.5) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Show the plots 
+sorensen_pcoa_plot + bray_pcoa_plot + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+Above are two PCoA (Principal Coordinates Analysis) plots showing differences in microbial community composition across sampling stations and dates:
+
+- **Left (Panel A):** Sorensen dissimilarity (presence/absence-based)
+- **Right (Panel B):** Bray-Curtis dissimilarity (abundance-weighted)
+
+We can conclude that: 
+
+1. Station is the dominant factor structuring microbial communities.
+2. Date also contributes, likely reflecting environmental or seasonal change.
+3. Bray-Curtis highlights both spatial and temporal patterns more strongly because between the two axes more variation is explained (~50%) than Sorensen (~35%), suggesting that abundance differences among taxa matter in this system. We gain ~15% of more variation explained in the data in 2 axes when incorporating abundances.
+
+<span style="color: red;">INTERPRETATION #5: Plot your data using a PCoA. Interpret what you can conclude from the PCoA.</span>
+
+There is a gap between blocks. The middle blocks are dispersed in a way that sort of demonstrates a gradual shift in community. There are a lot of samples in block 8-7 and a few (or just tightly clustered) in block 10-2-3. I don't see any trend from create_date. Overall this looks like it would indicate that block has an effect on community/can explain about 31% and 25% of the differences in abundance. There is not a strong effect from the second axis, so block is the main factor here. The Sorensen shows more difference and the BC shows more overlap, as predicted. I would assume then that the dominant groups don't change very much, though they may in relative abundance.
+
+## 5b. NMDS: Non-Metric Multidimensional Scaling 
+
+**Non-metric Multidimensional Scaling (NMDS)** is a rank-based ordination method commonly used in microbial ecology to visualize differences in community composition. Unlike metric methods like PCoA, *NMDS does not preserve exact distances but instead maintains the rank order of dissimilarities between samples*. This makes it well-suited for ecological data that are high-dimensional, non-linear, and zero-inflated.
+
+NMDS works by iteratively arranging samples in a low-dimensional space (typically 2D) to best match the original distance rankings from a dissimilarity matrix, such as Bray-Curtis. The quality of the fit is measured by stress—lower stress indicates a better match. Because NMDS does not assume linear relationships and is less prone to artifacts like the arch effect, it is ideal for exploring patterns in complex microbial datasets. Interpretation focuses on the relative positioning of samples rather than axis variance, making it especially useful for identifying ecological gradients or clustering by treatment or site.
+
+In NMDS, the **stress value** is a key metric that quantifies how well the lower-dimensional ordination preserves the rank order of distances from the original high-dimensional dissimilarity matrix. In simple terms, stress reflects how faithfully the 2D or 3D plot represents the real structure of your microbial community data. The lower the stress, the better the ordination represents the data.
+
+- **Stress < 0.1** is often reported as a strong result.
+- **Stress < 0.2** is still commonly accepted but it's best if < 0.15, especially with complex, high-diversity microbiome data (*e.g.,* 16S or metagenomic datasets with many samples and ASVs).
+- Some papers explicitly state they use NMDS for visualizing trends, not exact distances, so stress < 0.2 is considered acceptable in that context.
+- It’s common to see NMDS with stress values between 0.08–0.15 in published studies.
+
+*Okay, let's draw some NMDS plots!*
+
+```{r nmds-plots, fig.height=3.5, fig.width=7}
+## SORENSEN 
+scaled_soren_nmds <- 
+  ordinate(physeq = scaled_physeq,
+         method = "NMDS",
+         distance = "bray", binary = TRUE)
+
+# Plot it! 
+sorensen_nmds_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                ordination = scaled_soren_nmds,
+                color = "block",
+                #shape = "date", #saw no effect of date, don't wanna confuse it more
+                title = "Sorensen NMDS") + 
+  #scale_color_manual(values = salinity_colors) + 
+  #scale_shape_manual(values = date_shapes) + 
+  geom_point(size = 5, alpha = 0.5, aes(color = block)) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+### Bray-Curtis 
+# Second, calculate NMDS with Bray-Curtis
+scaled_bray_nmds <- 
+  ordinate(physeq = scaled_physeq,
+         method = "NMDS",
+         distance = "bray", binary = FALSE)
+
+# Plot it: Bray-Curtis NMDS 
+bray_nmds_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                ordination = scaled_bray_nmds,
+                color = "block",
+              #  shape = "date",
+                title = "Bray-Curtis NMDS") + 
+ # scale_color_manual(values = salinity_colors) + 
+  #scale_shape_manual(values = date_shapes) + 
+  geom_point(size = 5, alpha = 0.5, aes(color = block)) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Show the plots 
+sorensen_nmds_plot + bray_nmds_plot + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+
+<span style="color: red;">INTERPRETATION #6: Plot your data using NMDS and interpret the results. How does the NMDS compare to the PCoA you generated in Interpretation #5? Do the two ordination methods tell a consistent story, or do you notice any differences in how the samples are arranged? Make sure to report the stress value and comment on whether it is acceptable.</span>
+
+These look more jumbled, but the idea is that distance shows dissimilarity. The communities of 8 and 9 are very similar, and 1 and 2 are very dissimilar. The colors show sort of opposite of what I would expect, because in the PCoA blocks 2-3 were tightly clustered, but here blocks 8-9 are instead. My lowest stress value is .14 from Run 2 which is acceptable.
+
+
+## All ordinations together!
+
+```{r ordinations, fig.width=7, fig.height=6}
+sorensen_pcoa_plot + bray_pcoa_plot + 
+sorensen_nmds_plot + bray_nmds_plot + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+<span style="color: red;">INTERPRETATION #7: Plot both the PCoA and NMDS together. Which of the two ordination methods best represents your data and why? Consider the strengths and limitations of each method. For example, the variance explained by each PCoA axis versus the stress value of the NMDS could be used to justify your choice. Do both methods support the same biological conclusions?</span>
+
+
+
+# 6. Multivariate Statistics
+
+## 6a. PERMANOVA: Testing Means/Centroids
+
+The goal of PERMANOVA is to ask: *Do the centroids (i.e., means) differ between groups?*  
+
+**PERMANOVA** stands for **Permutational Multivariate Analysis of Variance**. It is a statistical test used in microbial ecology to determine whether the composition of microbial communities differs significantly between groups—for example, between different treatment conditions, time points, or sample types.
+
+Unlike traditional ANOVA, which compares means of univariate data, PERMANOVA works on a **distance or dissimilarity matrix** (like Bray-Curtis or UniFrac). It assesses whether the **centroids** (multivariate means) of different groups in that distance space are significantly farther apart than we’d expect by chance. The test uses permutations to randomly shuffle group labels and calculate a distribution of test statistics, allowing it to compute a **p-value** without assuming normality—making it well-suited for ecological data, which are often non-normal and complex.
+
+To run PERMANOVA, we will first compute a dissimilarity matrix between all pairs of samples (like we just did! 😁), and then test whether the variation **between groups** is greater than the variation **within groups**. A low p-value (typically < 0.05) suggests that community composition differs significantly between the groups being compared.
+
+However, PERMANOVA is **sensitive to differences in within-group dispersion** (*i.e.,* variability). If one group is much more variable than another, PERMANOVA might detect a significant result even if the centroids aren't truly different. Because of this, it's good practice to also run a **test for homogeneity of dispersion** (*e.g.,* `betadisper` in R) to check that group variances are comparable, which we will do next!
+
+**Key Parameters in `adonis2()`**
+
+- `strata`: Use strata to restrict permutations within groups, which is critical for paired or repeated measures designs. This would be a column in the `metadata_df`.
+    - example: `strata = metadata_df$Sample_Names`
+- `by`: Specifies how model terms are tested. It can be: 
+    - `by = "terms"`: (default) tests each term sequentially. Therefore, it is sensitive to the order in which we put the varaibles into the model. 
+    - `by = "margin"`: tests each term while adjusting for others (like Type III sum of squares). Using `margin` ensures that each term is tested independently of the others—especially important when interactions are included or the design is unbalanced.
+    - `by = "none"`: tests only the full model.
+- `parallel`: Runs permutations using multiple CPU cores. This is helpful for large datasets or when using a large number of permutations.
+
+**Summary Table of Useful `adonis2()` Parameters**
+
+| Parameter      | Purpose                                           | When to Use                                                   |
+|----------------|---------------------------------------------------|----------------------------------------------------------------|
+| `permutations` | Number of permutations for p-value calculation   | Always (use 9999+ for more stable results)                     |
+| `strata`       | Restrict permutations within groups               | For paired samples, repeated measures, or blocks               |
+| `by`           | Controls how model terms are tested              | Use `"margin"` to test each variable while adjusting for others |
+| `method`       | Calculate distance matrix internally              | Only if supplying a raw OTU/ASV table                          |
+| `sqrt.dist`    | Apply square-root transformation to distances     | Rarely needed; used in specific workflows                      |
+| `parallel`     | Run permutations using multiple CPU cores         | Speeds up large analyses with many permutations                |
+
+**Categorical & Continuous Variables in PERMANOVA**
+
+`adonis2()` can also be run on continuous variables — and it’s actually a powerful way to test whether variation in microbial community composition is associated with continuous environmental or biological gradients (*e.g.,* pH, temperature, nutrient concentration, latitude, host age, etc.). In `adonis2()`, continuous variables are treated as predictors in a linear model-like framework. The test evaluates whether changes in the continuous variable are significantly associated with shifts in microbial community composition (as measured by your distance matrix).
+
+For now, we will focus on comparing the Sorensen and the Bray-Curtis.  
+
+### 6a-I. Categorical Variables
+
+Here, we will focus on the categorical data of block to test the hypothesis.
+
+#### Sorensen
+
+```{r PERMANOVA-categorical-sorensen}
+# Sorensen
+## 1. Run with by = terms for R² values, sensitive to order of variables! 
+## ALWAYS check and confirm the order of your terms and how they interact with each other.  
+sorensen_salGroup_adonis_terms1 <- adonis2(scaled_sorensen_dist ~ block, data = metadata_df, by = "terms")
+sorensen_salGroup_adonis_terms1
+
+# Check the order of the terms
+# sorensen_salGroup_adonis_terms2 <- adonis2(scaled_sorensen_dist ~ block, data = metadata_df, by = "terms")
+# sorensen_salGroup_adonis_terms2
+```
+
+
+**Understanding PERMANOVA output:**
+
+- **Pr(>F) Interpretation:** The p-value. Is it "*significant*"?  
+    - This represents the "*probability of observing an F-statistic this extreme (or more extreme), assuming the null hypothesis is true.*" In essence, this is the **p-value** from the permutation test. This value tells us whether the variance explained by a variable (or interaction) is significantly greater than expected by chance.
+- **R^2^ value Interpretation:** How much variation is explained by this variable—an effect size.
+    - Not dependent on sample size. 
+    - Interpretable across studies! 
+    - R^2^ (also called “pseudo R^2^” in PERMANOVA) is the proportion of total variation in the multivariate data that is explained by a specific variable or interaction.
+        - R^2^ = 0.25 means that the term explains 25% of the variation in the community composition.
+        - R^2^ = 0.03 means that the term explains only 3% of variation — possibly statistically significant but a small effect. This is important because 3% is not much variation! So, therefore, even it if is *significant* based on the p-value, it explains an *insignificant* amount of variation. 
+- **F-statistic Interpretation:** How strongly a variable separates groups, relative to residuals. 
+    - Higher F-values tell us that there is stronger separation of groups. he F-statistic is a ratio of explained to unexplained variation, adjusted for degrees of freedom — similar to traditional ANOVA, but applied to a distance matrix (like Bray-Curtis, Jaccard, *etc.*). It tells you how much more variation is explained by the model (with your term included) compared to the residual (unexplained) variation.
+
+***Interpreting PERMANOVA with Sorensen Dissimilarity:***
+
+So, as it applies to the Sorensen Dissimilarity, we can already draw a few conclusions about our data! We can state that: 
+
+1. **Salinity group** is the strongest factor, explaining ~`r round(sorensen_salGroup_adonis_terms1$R2[1]*100, digits = 0)`% of the variation in microbial community composition, which is statistically significant based on the p-value of <`r sorensen_salGroup_adonis_terms1$"Pr(>F)"[1]`. This suggests `salinity_group` plays a major role in structuring the community.
+
+4. The total residuals of the model is ~`r round(sorensen_salGroup_adonis_terms1$R2[4]*100, digits = 0)`% of the variation remains unexplained by these variables, which is typical in complex environmental microbiome datasets.
+
+
+**Biological takeaway for Sorensen Dissimilarity:**
+
+Both spatial (salinity group) and temporal (date) gradients independently and interactively shape microbial beta diversity in this dataset based off of shared presence/absence of ASVs as it relates to the Sorensen dissimilarity. The strong interaction effect suggests that environmental dynamics (*e.g.,* changes in salinity, temperature, or nutrient pulses) may not be synchronous or homogeneous across the lake, leading to localized temporal patterns in community structure.
+
+That said, the residuals of the model are ~`r round(sorensen_salGroup_adonis_terms1$R2[4]*100, digits = 0)`%. In other words, we can explain ~`r 100-round(sorensen_salGroup_adonis_terms1$R2[4]*100, digits = 0)`% of the variation in the data from our model. 
+
+**Therefore, we will need to explore the role that abundance plays in shaping microbial community composition using the Bray-Curtis Dissimilarity.**
+
+#### Bray-Curtis
+
+```{r PERMANOVA-categorical-bray}
+# Bray-Curtis
+## ALWAYS check and confirm the order of your terms and how they interact with each other.  
+bray_salGroup_adonis_terms1 <- adonis2(scaled_bray_dist ~ block, data = metadata_df, by = "terms")
+bray_salGroup_adonis_terms1
+# 
+# bray_salGroup_adonis_terms2 <- adonis2(scaled_bray_dist ~ date * salinity_group, data = metadata_df, by = "terms")
+# bray_salGroup_adonis_terms2
+```
+
+**Interpreting PERMANOVA with Bray-Curtis Dissimilarity:**
+
+Similarly, as it applies to the Sorensen Dissimilarity, we can already draw a few conclusions about our Bray-Curtis data! We can state that: 
+
+1. **Block** is the strongest factor, explaining ~`r round(bray_salGroup_adonis_terms1$R2[1]*100, digits = 0)`% of the variation in microbial community composition, which is statistically significant based on the p-value of <`r bray_salGroup_adonis_terms1$"Pr(>F)"[1]`. This is notably higher than what was observed with Sorensen dissimilarity (~`r round(sorensen_salGroup_adonis_terms1$R2[1]*100, digits = 0)`%), suggesting that abundance differences across salinity groups are even more pronounced than presence/absence patterns alone.
+
+4. The total residiuals of the model is ~`r round(bray_salGroup_adonis_terms1$R2[4]*100, digits = 0)`% of the variation remains unexplained by these variables, which is lower than in the Sorensen model (~61%), suggesting Bray-Curtis captures more of the ecologically meaningful structure in this dataset.
+5. Finally, the **Pseudo-F values** are illuminating as they indicate that salinity group is roughly 3x more important in separating the groups than date and roughly 6x the interaction of salinity group and date. This is a pattern consistent with what was observed in the Sorensen model.
+
+### Comparing Sorensen & Bray Curtis Results 
+
+- Both models reveal strong salinity group and temporal (date) structuring of microbial communities, with significant interactions.
+- The Bray-Curtis model explains ~10% more total variation, suggesting that abundance patterns (not just presence/absence) capture additional ecological structure.
+- The higher R^2^ for salinity group in Bray-Curtis (~`r round(bray_salGroup_adonis_terms1$R2[1]*100, digits = 0)`% vs. ~`r round(sorensen_salGroup_adonis_terms1$R2[1]*100, digits = 0)`%) indicates that abundance shifts in across salinity gradients are even more pronounced than presence/absence alone would suggest.
+- Residual variation is lower in Bray-Curtis, further supporting its added sensitivity to ecologically meaningful abundance patterns.
+- The separation between groups (pseudo-F value) is much more pronounced when incorporating abundance information via Bray-Curtis dissimilarity, reflecting stronger signal from dominant taxa.
+
+*In other words:* 
+
+Community composition is strongly influenced by `salinity_group` and `date` in both models, but the Bray-Curtis model (abundance-based) explains more variation overall, especially for `salinity_group` effects. This suggests that abundance shifts, not just species turnover, play a major role in structuring microbial communities across salinity gradients and through time in this system.
+
+
+## 6a-II: Continuous Variables
+###NOT RUNNING - CATEGORICAL###
+Now, we will evaluate the same question using the continuous value of salinity in practical salinity units or PSU. 
+
+```{r PERMANOVA-sorensen-salinity, eval=FALSE, message=FALSE, include=FALSE}
+## Now, let's add a continuous variable. 
+sorensen_salinity_adonis_terms1 <- adonis2(scaled_sorensen_dist ~ salinity_psu * date, data = metadata_df, by = "terms")
+sorensen_salinity_adonis_terms1
+
+# Check different order 
+sorensen_salinity_adonis_terms2 <- adonis2(scaled_sorensen_dist ~ date * salinity_psu, data = metadata_df, by = "terms")
+sorensen_salinity_adonis_terms2
+
+### PERMANOVA: Continuous variable with Salinity 
+
+## Now, let's add a continuous variable. 
+bray_salinity_adonis_terms1 <- adonis2(scaled_bray_dist ~ salinity_psu * date, data = metadata_df, by = "terms")
+bray_salinity_adonis_terms1
+
+# Check different order 
+bray_salinity_adonis_terms2 <- adonis2(scaled_bray_dist ~ date * salinity_psu, data = metadata_df, by = "terms")
+bray_salinity_adonis_terms2
+```
+
+
+<span style="color: red;">INTERPRETATION #8: Using the above example to guide you, please run the appropriate PERMANOVA for your scientific question and interpret the results. If you have more than one variable of interest, please make sure to run your model in at least two different term orders and comment on whether the R-squared value changes between models. If so, what does this tell you about whether your variables are independent of one another or co-varying? What biological conclusion can you draw from your PERMANOVA results, and do you accept or reject your hypothesis?</span>
+
+adonis2(formula = scaled_sorensen_dist ~ block, data = metadata_df, by = "terms")
+          Df SumOfSqs      R2      F Pr(>F)    
+block      1    6.463 0.19172 28.464  0.001 ***
+Residual 120   27.247 0.80828                  
+Total    121   33.710 1.00000    
+
+      Df SumOfSqs      R2      F Pr(>F)    
+block      1    5.915 0.15547 22.091  0.001 ***
+Residual 120   32.133 0.84453                  
+Total    121   38.048 1.00000   
+
+
+# 6b. Betadisper: Testing Variances/Dispersions
+
+`betadisper()` is an important companion to PERMANOVA when analyzing beta diversity in microbial ecology. It checks a key assumption of PERMANOVA: homogeneity of group dispersions (variances). **If this assumption is violated, the PERMANOVA results might be driven by differences in spread rather than true differences in community composition.**
+
+We will use the `betadisper()` and then the `permutest()` functions from the vegan package in R, which will perform an analysis of multivariate homogeneity of group dispersions—also called a PERMDISP test. It will: 
+
+First, `betadisper()` will perform the following steps: 
+
+1.	Input: A distance matrix (e.g., from vegdist() or phyloseq::distance()) and a grouping factor (e.g., station).
+2.	Calculate the centroid of each group in multivariate space (via PCoA).
+3.	Compute the distance from each sample to its group’s centroid.
+4.	Store those distances — these are the within-group dispersions.
+
+Note that the `betadisper()` function does not test for significance. It just computes the distances (dispersion) and organizes them into a model object. So, once `betadisper()` has calculated the within-group distances, `permutest()` will need to be run to test whether those dispersions differ significantly between groups using a permutation-based ANOVA.
+
+Second, `permutest()` will perform the following steps: 
+
+1.	Null hypothesis (H~0~): All groups have equal multivariate dispersion.
+2.	Observed F-statistic is calculated from the variation among group dispersions.
+3.	Permutations: Group labels are shuffled many times (*e.g.,* 999 times).
+4.	For each permutation, a new F-statistic is calculated.
+5.	The p-value is the proportion of permutations where the F is as extreme or more extreme than the observed F.
+
+The result from `permutest()` is a robust non-parametric p-value testing whether dispersion differs across groups.
+
+**Always run `betadisper()` and `permutest()` after PERMANOVA** to test whether the groups have similar within-group variation.
+
+- If p > 0.05 (not significant), the PERMANOVA result is reliable.
+- If p < 0.05 (significant), be cautious—group differences may be due to dispersion, not composition! However, not all is lost as we may expect this to be biologically true.  
+
+**In Summary:**
+
+| Function       | What it does                                                  | Significance test? | Output includes                    |
+|----------------|---------------------------------------------------------------|---------------------|------------------------------------|
+| `betadisper()` | Computes within-group distances to centroids (dispersion)     | ❌ No                | Distances, centroids, model object |
+| `permutest()`  | Tests if group dispersions differ using permutations          | ✅ Yes               | F-value, permutation-based p-value |
+
+### Sorensen
+
+```{r betadisper-sorensen}
+# Homogeneity of Disperson test with beta dispr
+# Sorensen Betadisper - Salinity Group (Categorical) 
+dispr_sorensen_salGroup <- betadisper(scaled_sorensen_dist, metadata_df$block)
+# permutest() performs a non-parametric permutation test, which is robust and valid for the kind of data used in beta diversity analysis (e.g., dissimilarity matrices).
+permutest(dispr_sorensen_salGroup)
+
+# Sorensen Betadisper - Date  
+# dispr_sorensen_date <- betadisper(scaled_sorensen_dist, metadata_df$date)
+# permutest(dispr_sorensen_date)
+
+# Sorensen Betadisper - Salinity PSU (Continuous)
+# dispr_sorensen_salinity <- betadisper(scaled_sorensen_dist, metadata_df$salinity_psu)
+# permutest(dispr_sorensen_salinity)
+```
+Response: Distances
+           Df Sum Sq Mean Sq      F N.Perm Pr(>F)    
+Groups      9 3.5700 0.39666 20.168    999  0.001 ***
+Residuals 112 2.2028 0.01967    
+
+
+Interpreting `betadisper()/permutest()` results:
+
+**Sorensen:**
+
+- **Salinity Group** has a marginally significant `betadisper()`/`permutest()` result (F = 2.79, p = 0.05). Therefore, we cannot conclude with full confidence that the PERMANOVA results are driven purely by differences in community composition between salinity groups. Some of the signal may reflect differences in within-group dispersion rather than true centroid differences. 
+    - That said, this is right at the boundary of significance, and we might ecologically expect that freshwater or highly saline environments would naturally harbor more or less variable communities as we saw in the ordination plots above. Biology can also determine dispersion, so not all is lost! Though, this result warrants some caution in interpretation! 
+- **Date** does not have a significant `betadisper()/permutest()` result. Therefore, dispersion is homogeneous across dates and the PERMANOVA results likely represent a true difference in community composition through time.  
+- **Salinity_psu** does not have a significant `betadisper()/permutest()` result (F = 0.67, p = 0.879). Dispersion is very homogeneous across salinity values, and we can confidently trust that the PERMANOVA results reflect real differences in community composition along the salinity gradient rather than artifacts of unequal dispersion. 
+
+## Bray-Curtis
+
+Now, let's test the same with Bray-Curtis!
+
+```{r betadisper-bray}
+# Bray-Curtis Betadisper - Salinity Group (Categorical)  
+dispr_bray_salGroup <- betadisper(scaled_bray_dist, metadata_df$block)
+permutest(dispr_bray_salGroup)
+
+# # Bray-Curtis Betadisper - Date  
+# dispr_bray_date <- betadisper(scaled_bray_dist, metadata_df$date)
+# permutest(dispr_bray_date)
+# 
+# # Bray-Curtis Betadisper - Salinity PSU (Continuous)
+# dispr_bray_salinity <- betadisper(scaled_bray_dist, metadata_df$salinity_psu)
+# permutest(dispr_bray_salinity)
+```
+Response: Distances
+           Df Sum Sq  Mean Sq     F N.Perm Pr(>F)    
+Groups      9 2.1988 0.244314 15.21    999  0.001 ***
+Residuals 112 1.7990 0.016063   
+
+
+**Bray-Curtis:**
+
+- **Salinity Group** has a marginally significant `betadisper()`/`permutest()` result (F = 2.72, p = 0.046), which is nearly identical to the Sorensen result (F = 2.79, p = 0.05). Therefore, as with Sorensen, we cannot conclude with full confidence that the PERMANOVA results are driven purely by differences in community composition between salinity groups. Instead, some of the signal may reflect differences in within-group dispersion. Again, this is right at the boundary of significance, and ecological differences in variability across salinity regimes are biologically plausible, so some caution is warranted but not despair!
+- **Date** does not have a significant `betadisper()`/`permutest()` result (F = 0.63, p = 0.565). Dispersion is homogeneous across dates and the PERMANOVA results likely represent a true difference in community composition through time -- consistent with the Sorensen result.
+- **Salinity in PSU** does not have a significant `betadisper()`/`permutest()` result (F = 0.59, p = 0.947). Dispersion is very homogeneous across salinity values, and we can confidently trust that the PERMANOVA results reflect real differences in community composition along the salinity gradient -- again fully consistent with Sorensen.
+
+### Comparing Sorensen & Bray Curtis Results 
+
+**The Bray-Curtis results are in complete agreement with the Sorensen results across all three variables, which strengthens our overall conclusions:**
+
+1. **Salinity group** shows marginally significant dispersion in both metrics, meaning we need to be careful in our PERMANOVA interpretations for this categorical variable. However, the ecological plausibility of differing variability across salinity regimes, combined with the robustness of the result across both metrics, gives us reason to be cautiously optimistic rather than dismissive of the PERMANOVA findings.
+2. **Salinity in PSU and date** both show homogeneity of variances in both metrics, meaning we can place greater trust in the centroid differences discovered in the PERMANOVA results for these variables. The consistency across Sorensen and Bray-Curtis makes this conclusion especially robust!
+
+
+# Interpreting PERMANOVA with Betadisper
+
+## What if PERMANOVA and Betadisper tests are both significant?
+
+If **PERMANOVA is significant** _and_ **betadisper is also significant**, it suggests that:
+
+- Your groups **differ in community composition** (centroids), **but** also
+- They may **differ in dispersion** (variance/spread), which can influence the PERMANOVA result
+
+This raises the possibility that the PERMANOVA significance is at least partly driven by **differences in group variability**, not just true compositional shifts.
+
+| Scenario                                       | Interpretation                                                               |
+|------------------------------------------------|-------------------------------------------------------------------------------|
+| ✅ PERMANOVA significant<br>❌ betadisper not significant | Likely true compositional differences (valid PERMANOVA result)                |
+| ✅ PERMANOVA significant<br>✅ betadisper significant     | Differences may be due to dispersion, not centroids — interpret with caution |
+
+**Next steps:**
+
+- Reflect on the ordination plots above to visually assess whether centroids are distinct or just differently dispersed.
+- Plot distances to group centroids.
+- Consider running PERMANOVA on a subset with equal dispersions.
+- Reflect on ecological plausibility: Are the dispersion differences biologically meaningful? Sometimes real biological processes cause both composition shifts and dispersion changes (e.g., disturbance, environmental heterogeneity)! So, don't lose your heart about your data yet! :) 
+
+> Even with unequal dispersion, true ecological differences can still exist — the key is to **interpret with care** and use supporting evidence.
+
+If this happens, the results could be written something like: "*Significant differences in microbial community composition were detected across salinity groups (PERMANOVA: p < 0.001), though within-group dispersion also differed marginally among groups (permutest: p = 0.046-0.05), meaning some salinity environments may harbor inherently more variable communities than others. The consistency of this result across both presence/absence and abundance-based metrics, combined with distinct centroid clustering in ordination space, supports salinity as a genuine driver of community structure. However, interpretations should account for potential heterogeneity in within-group variability.*"
+
+
+<span style="color: red;">INTERPRETATION #9: Using the above example to guide you, run the appropriate betadisper() and permutest() for your scientific question and interpret the results. What biological conclusion can you draw from your dispersion analysis?</span>
+
+<span style="color: red;">INTERPRETATION #10: Taking into account both the betadisper()/permutest() and the PERMANOVA (adonis2()) test that you ran, what biological conclusion can you draw regarding your data?</span>
+
+
+# Final info for Reproducibility 
+
+## Check Render Time
+```{r stop-time}
+# Take the time now that we are at the end of the script
+end_time <- Sys.time()
+end_time 
+
+# Echo the elapsed time
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+```
+
+## Session Information
+
+```{r session-info}
+# Ensure reproducibility with package version information
+devtools::session_info()
+```
