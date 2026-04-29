@@ -637,7 +637,7 @@ num_samples
 class(physeq_depth1200)
 ```
 
-<span style="font-weight: bold;">I've removed anything below 1200 reads. I now have `r num_samples`. The paper had 126. # samples does not change when I filter by 1000 instead. That seems wrong but it is past me. </span>
+<span style="font-weight: bold;">I've removed anything below 1200 reads. I now have `r num_samples`. The paper had 126. # samples does not change when I filter by 1000 instead.  </span>
 
 
 # 8. Write out the data 
@@ -660,6 +660,8 @@ seqSums_df #good
 # Please be sure to use the correct path to the appropriate directory in your file system
 save(preprocessed_physeq, file = "/local/workdir/erw98/Brassica_Growth_2026/data/03_PreProcessing/preprocessed_phyloseq.RData")
 ```
+We now have a preprocessed phyloseq object with 122 ASVs and a sequencing depth of 1200. The figures show the justification for filtering at this level. With these ASVs we will be able to identify the most common taxa on the Brassica phyllosphere.
+
 
 # Final info for Reproducibility 
 
