@@ -7,6 +7,9 @@ editor_options:
   chunk_output_type: console
 ---
 
+Goal: Plot taxa to visualize the top 10 phyla found across blocks. Individually plot phyla to view changes in each group. Create a composition bar graph.
+I am using only phyla level because my Genera had many NAs, but the paper goes to genus.
+
 # Load Environment 
 ```{r load-environ}
 pacman::p_load(tidyverse, phyloseq, patchwork,dplyr,
@@ -192,5 +195,5 @@ ggplot(df_area, aes(x = block, y = Abundance, fill = Phylum)) +
        y = "Relative Abundance") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
-
+We see Pseudomonas is the highest abundant clade, which matches the conclusions of the model paper. Followed by Actinomycetes and Bacillota. These plots show that abundance drops in block 10, which is expected according to the paper but in contrast to our Biodiversity plots which show a constant increase in abundance.
 
