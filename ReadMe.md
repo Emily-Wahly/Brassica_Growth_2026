@@ -4,4 +4,8 @@ Bell, J.K., Helgason, B. & Siciliano, S.D. Brassica napus phyllosphere bacterial
 
 256 fastq files of the amplified V4 region of the bacterial 16S rRNA using the 515F/806R primers, producing a 291-bp sequence, or 252 bp without the primers
 
+When is the microbial richness highest?
+How does the microbial community shift over time?
+
 The phyllosphere is predicted to change over development because the plant performs different functions during different growth phases, and the microbiome must support these varied functions. The microbial community could provide immunity, UV resistance, and dessication, and is altered by weather patterns. Describing this relationship would inform the role of microbes in supporting plant growth and the plasticity of the microbial community in response to plant signals. I will find the alpha diversity indices (Shannon and Simpson) and Abundance-based Coverage Estimate for each plant stage. Significant differences in the diversity indices between growth stages would answer my question on variation in the phyllosphere by growth stage. I will perform weighted and unweighted UniFrac (beta diversity) to compare the microbiomes over time using taxon presence/absence data. UniFrac identifies unique taxon branches and their length, so longer branches have more variation (or more rare taxa) when compared to the other community. A value of 0 indicates no variation between communities (low beta diversity) while 1 indicates no shared taxa (high beta diversity). High UniFrac scores between growth stages would support my alternate hypothesis, and I expect to see longer branches in the ripening and flowering stage than seed stage, where there are expected to be fewer taxa overall.
+
