@@ -3,6 +3,7 @@ Phyllosphere diversity in Brassica napus throughout growth stages
 Bell, J.K., Helgason, B. & Siciliano, S.D. Brassica napus phyllosphere bacterial composition changes with growth stage. Plant Soil 464, 501–516 (2021). https://doi.org/10.1007/s11104-021-04965-2; SRA found in the NCBI Bioprojects under PRJNA 635907
 
 256 fastq files of the amplified V4 region of the bacterial 16S rRNA using the 515F/806R primers, producing a 291-bp sequence, or 252 bp without the primers
+primer set 515F with Illumina adapters (5’ TCGTCGGCAGCGTCAGATGTGTATAAGAGACAGGTGYCAGCMGCCGCGGTAA 3′) and the 806R (5′ - GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG GGA CTA CCG GGG TAT CT - 3′) , 300bp reads
 
 When is the microbial richness highest?
 How does the microbial community shift over time?
